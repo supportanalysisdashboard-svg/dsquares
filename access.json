@@ -1,0 +1,23 @@
+{
+  "admin": "admin123",
+  "user": "dsq123",
+  "clients": {
+    "vodafone123": { "projects": ["Red", "Red DOM", "Redrebalance (HHT)", "VF Enterprise Packs", "Sherkety", "Red Ramadan", "VF Red Ramadan", "VF Mass Retail", "VF Marketplace", "VF Cash Deals"], "is_vodafone": true, "logo": "logo_RED.png" },
+    "nbe123": { "projects": ["Alahly Points"], "is_vodafone": false, "logo": "logo_NBE.png" },
+    "Alex123": { "projects": ["Alex Bank"], "is_vodafone": false, "logo": "logo_Ab.png" },
+    "cib123": { "projects": ["CIB Bonus"], "is_vodafone": false, "logo": "logo_CIB.png" },
+    "wdc123": { "projects": ["Wadi Degla"], "is_vodafone": false, "logo": "log-WD.png" },
+    "bm123": { "projects": ["Bank Misr"], "is_vodafone": false, "logo": "logo_BM.png" },
+    "Exxon123": { "projects": ["Exxon Mobil"], "is_vodafone": false, "logo": "logo_EM.png" },
+    "Mashreq123": { "projects": ["El Mashreq Bank"], "is_vodafone": false, "logo": "logo_MB.png" },
+    "Agricole123": { "projects": ["Credit Agricole"], "is_vodafone": false, "logo": "logo_CA.png" },
+    "FAB123": { "projects": ["FAB"], "is_vodafone": false, "logo": "logo_FAB.png" },
+    "NBK123": { "projects": ["NBK"], "is_vodafone": false, "logo": "logo_NBK.png" },
+    "WE123": { "projects": ["WE"], "is_vodafone": false, "logo": "logo_WE.png" },
+    "QNB123": { "projects": ["QNB"], "is_vodafone": false, "logo": "logo_QNB.png" },
+    "Jotun123": { "projects": ["Jotun"], "is_vodafone": false, "logo": "logo_Jotun.png" },
+    "Mazaya123": { "projects": ["Mazaya"], "is_vodafone": false, "logo": "logo_MAZ.png" },
+    "Sky Logistics123": { "projects": ["Sky Logistics"], "is_vodafone": false, "logo": "logo_SL.png" },
+    "michelin123": { "projects": ["Michelin"], "is_vodafone": false, "logo": "michelin123.png" }
+  }
+}

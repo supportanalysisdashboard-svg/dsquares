@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Support Analysis Dashboard</title>
+<script>window.DS_BUILD='20260807154907';</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;900&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=20260807154907">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+</head>
+<body>
+
+<!-- ============ LOGIN SCREEN ============ -->
+<div id="login-screen" class="lp-screen" hidden>
+  <div class="lp-bg"></div>
+  <div class="lp-grid"></div>
+  <div class="lp-orb lp-orb1"></div>
+  <div class="lp-orb lp-orb2"></div>
+  <div class="lp-orb lp-orb3"></div>
+  <div class="lp-wrap">
+    <div class="lp-badge"><div class="lp-badge-dot"></div>Live System</div>
+    <div class="lp-logo"><img src="assets/logo_big.png" alt="Dsquares" onerror="this.style.display='none'"></div>
+    <div class="lp-title">Support Analysis Dashboard</div>
+    <div class="lp-sub">Dsquares &bull; 2026</div>
+    <div class="lp-card">
+      <span class="lp-card-icon">&#128274;</span>
+      <div class="lp-card-title">Enter Access Key</div>
+      <input id="login-key" class="lp-input" type="password" placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;" autocomplete="off">
+      <div id="login-error" class="lp-error" hidden>Invalid access key</div>
+      <button id="login-btn" class="lp-btn">Sign in</button>
+    </div>
+    <div class="lp-footer">Dsquares &copy; 2026 &nbsp;&middot;&nbsp; Confidential</div>
+  </div>
+</div>
+
+<!-- ============ LOADING OVERLAY ============ -->
+<div id="loading-screen" class="ds-loading-screen" hidden>
+  <div class="ds-loading-title">Support Analysis Dashboard</div>
+  <div class="ds-loading-sub">Preparing your dashboard &mdash; first load only, it stays fast afterwards.</div>
+  <div class="ds-spinner"></div>
+  <div id="loading-status" class="ds-loading-status">Loading data&hellip;</div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app" class="app" hidden>
+  <button id="sb-toggle" class="sb-toggle" title="Toggle sidebar">☰</button>
+  <aside id="sidebar" class="sidebar"></aside>
+  <main id="main" class="main">
+    <header class="dashboard-header" id="dashboard-header"></header>
+    <div id="tabbar" class="tabbar"></div>
+    <div id="content" class="content"></div>
+  </main>
+</div>
+
+<script src="app.js?v=20260807154907"></script>
+</body>
+</html>
