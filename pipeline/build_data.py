@@ -66,7 +66,8 @@ PROJECT_RENAME = {"Red Ramadan": "VF Red Ramadan"}
 TZ = ZoneInfo("Africa/Cairo")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.join(ROOT, "web", "data")
+OUT = os.environ.get("DS_DATA_OUT") or os.path.join(ROOT, "web", "data")
+INDEX = os.environ.get("DS_INDEX") or os.path.join(ROOT, "web", "index.html")
 
 
 def csv_url(gid):
@@ -360,7 +361,7 @@ def stamp_index(build_ts):
     """Replace the DS_BUILD cache-busting marker in web/index.html so every build
     stamps a fresh version on styles.css/app.js (and window.DS_BUILD), which keeps
     browsers off stale cached assets."""
-    path = os.path.join(ROOT, "web", "index.html")
+    path = INDEX
     try:
         with open(path, "r", encoding="utf-8") as f:
             html = f.read()
