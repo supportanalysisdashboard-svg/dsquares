@@ -5,7 +5,7 @@
 
 /* ============================== CONFIG ============================== */
 const NAVY = '#002147', BLUE = '#0055A4', LIGHT = '#00AEEF', RED = '#FF4B4B', GREEN = '#00873d';
-const PIE_COLORS = ['#002147','#0055A4','#00AEEF','#0077cc','#4a90d9','#003d82','#00c6ff','#1a3a6b','#66b2e8','#0094d4'];
+const PIE_COLORS = ['#0055A4','#00AEEF','#16A34A','#F59E0B','#7C3AED','#EF4444','#0D9488','#DB2777','#65A30D','#0E7490'];
 const BLACKLIST = new Set([
   '','n/a','n.a','n','dropped call','call dropped','out of our scope','other','0','na',' ',
   'N','none','nan','N/A','0.0','NaN','None','n/m','N/M',"what's app"
@@ -200,6 +200,19 @@ function countBy(rows, colName, { clean = false, limit = null, sortDesc = true }
   arr.sort((a, b) => sortDesc ? b.value - a.value : (a.name < b.name ? -1 : 1));
   if (limit) arr = arr.slice(0, limit);
   return arr;
+}
+
+function topWithOthers(items, n = 6) {
+  const sorted = items.slice().sort((a, b) => b.value - a.value);
+  const top = sorted.slice(0, n);
+  const rest = sorted.slice(n);
+  const restSum = rest.reduce((s, x) => s + x.value, 0);
+  if (restSum > 0) {
+    const ex = top.find((x) => String(x.name).trim().toLowerCase() === 'others');
+    if (ex) ex.value += restSum;
+    else top.push({ name: 'Others', value: restSum });
+  }
+  return top;
 }
 
 function groupTop(rows, byCol, hoverCol, hoverN, { clean = true } = {}) {
@@ -734,7 +747,7 @@ function buildOverviewCharts(ffDrill, clientMode, isVf) {
     if (isVf) {
       const p = groupTop(ffDrill, 'Project', 'Call Microtype', 5);
       if (p.length) charts.push({ title: '🏢 3. Top 10 Projects', type: 'bar', items: p, base: NAVY, tooltip: hoverHeader(), click: clickF('Project'), wide: false });
-      const tt = countBy(ffDrill, 'Ticket type', { clean: true });
+      const tt = topWithOthers(countBy(ffDrill, 'Ticket type', { clean: true }));
       if (tt.length) charts.push({ title: '🎫 4. Ticket Type Share', type: 'pie', items: tt, click: clickF('Ticket type'), wide: false });
       const su = groupTop(ffDrill, 'Ticket subtype', 'Ticket type', 3);
       if (su.length) charts.push({ title: '🏷️ 5. Top 10 Subtypes', type: 'bar', items: su, base: NAVY, tooltip: hoverHeader(), click: clickF('Ticket subtype'), wide: false });
@@ -743,7 +756,7 @@ function buildOverviewCharts(ffDrill, clientMode, isVf) {
       const ac = countBy(ffDrill, 'Action taken', { clean: true, limit: 10 });
       if (ac.length) charts.push({ title: '🎬 7. Key Actions Taken', type: 'bar', items: ac, base: NAVY, click: clickF('Action taken'), wide: true });
     } else {
-      const tt = countBy(ffDrill, 'Ticket type', { clean: true });
+      const tt = topWithOthers(countBy(ffDrill, 'Ticket type', { clean: true }));
       if (tt.length) charts.push({ title: '🎫 Ticket Type', type: 'pie', items: tt, click: clickF('Ticket type'), wide: false });
       const su = groupTop(ffDrill, 'Ticket subtype', 'Ticket type', 3);
       if (su.length) charts.push({ title: '🏷️ Top Subtypes', type: 'bar', items: su, base: NAVY, tooltip: hoverHeader(), click: clickF('Ticket subtype'), wide: false });
@@ -761,7 +774,7 @@ function buildOverviewCharts(ffDrill, clientMode, isVf) {
     if (b.length) charts.push({ title: '📍 2. Top 10 Branches', type: 'bar', items: b, base: LIGHT, tooltip: hoverHeader(), click: clickF(branchCol), wide: false });
     const p = groupTop(ffDrill, 'Project', 'Call Microtype', 5);
     if (p.length) charts.push({ title: '🏢 3. Top 10 Projects', type: 'bar', items: p, base: NAVY, tooltip: hoverHeader(), click: clickF('Project'), wide: false });
-    const tt = countBy(ffDrill, 'Ticket type', { clean: true });
+    const tt = topWithOthers(countBy(ffDrill, 'Ticket type', { clean: true }));
     if (tt.length) charts.push({ title: '🎫 4. Ticket Type Share', type: 'pie', items: tt, click: clickF('Ticket type'), wide: false });
     const su = groupTop(ffDrill, 'Ticket subtype', 'Ticket type', 3);
     if (su.length) charts.push({ title: '🏷️ 5. Top 10 Subtypes', type: 'bar', items: su, base: NAVY, tooltip: hoverHeader(), click: clickF('Ticket subtype'), wide: false });
