@@ -617,6 +617,7 @@ function renderSidebar() {
   });
   $('#btn-logout').addEventListener('click', () => {
     if (slideTimer) { clearInterval(slideTimer); slideTimer = null; }
+    stopAutoRefresh();
     S.slideshow = false;
     localStorage.removeItem('ds_session');
     S.session = null;
@@ -649,7 +650,7 @@ function renderHeader() {
     <h2>Support Analysis Dashboard</h2>
     <div style="display:flex;justify-content:center;align-items:center;gap:10px;margin-top:5px;flex-wrap:wrap;">
       <span class="live-badge"><span class="live-dot"></span> LIVE</span>
-      <span class="sub-meta">Last updated: ${esc(updated)} | Auto</span>
+      <span class="sub-meta">Last updated: ${esc(updated)} | Auto-refresh 3 min</span>
     </div>
   </div>`;
 }
@@ -1704,6 +1705,27 @@ function renderAll() {
   resizeChartsSoon();
 }
 
+/* ============================== AUTO-REFRESH ============================== */
+const AUTO_REFRESH_MS = 3 * 60 * 1000;
+let autoTimer = null;
+
+function startAutoRefresh() {
+  if (autoTimer) clearInterval(autoTimer);
+  autoTimer = setInterval(async () => {
+    try {
+      const meta = await fetchJson('data/meta.json', { bust: true });
+      if (meta && meta.updated_iso && meta.updated_iso !== S.build) {
+        await loadData(true);
+        renderAll();
+      }
+    } catch (e) { console.error('auto-refresh failed', e); }
+  }, AUTO_REFRESH_MS);
+}
+
+function stopAutoRefresh() {
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+}
+
 /* ============================== SLIDESHOW ============================== */
 let slideTimer = null;
 
@@ -1838,6 +1860,7 @@ async function boot() {
   if (ensureFreshAssets()) return;
   renderAll();
   showLive();
+  startAutoRefresh();
 }
 
 async function init() {
