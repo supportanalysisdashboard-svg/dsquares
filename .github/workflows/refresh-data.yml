@@ -39,5 +39,6 @@ jobs:
             echo 'No data changes; nothing to commit.'
           else
             git commit -m "Refresh dashboard data"
+            git pull --rebase origin main
             git push
           fi
