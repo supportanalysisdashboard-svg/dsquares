@@ -36,6 +36,8 @@ const S = {
   ffBase: null,
   charts: [],
   build: null,
+  liveActive: false,
+  liveStamp: null,
 };
 
 /* ============================== HELPERS ============================== */
@@ -112,6 +114,206 @@ async function loadData(force) {
   S.sla = await fetchJson('data/sla.json', opts);
   S.redemption = await fetchJson('data/redemption.json', opts);
   hideLoading();
+}
+
+/* ============================== LIVE MODE ==============================
+   Reads the two ticket tabs straight from Google Sheets (gviz CSV endpoint)
+   so the dashboard shows every Freshdesk change the moment it lands in the
+   sheet — no waiting for the hourly build. Falls back to the bundled data
+   (web/data/*) whenever Google is unreachable. */
+const LIVE_SHEET_ID = '1f3L3zsB9u_kje2QezsL5qWKeg0vfbVDK8u42Q_gaio8';
+const LIVE_GIDS = { merchant: 471895160, client: 1950888044 };
+const LIVE_SHORT_NAMES = {
+  'Not Done': 'Solved',
+  'This Number Belongs To An Inactive Wallet': 'Inactive Wallet',
+  'Escalated- Tech Support': 'Esc-Tech',
+  'Escalated- Field Team': 'Esc-FO',
+  'Escalated- Management Team': 'Esc-MGT',
+  'Escalated- Sys.Set-Up': 'Esc-Sys',
+  'Escalated- Monitoring Team': 'Esc-M&C',
+  'Escalated- Product Team': 'Esc-PR',
+  'Escalated- CCubed Team': 'Esc-CCubed',
+  'Escalated- Data Team': 'Esc-Data',
+  'Escalated- Fraud Team': 'Esc-Fraud',
+  'Escalated- YGG/Like Card': 'Esc-YGG',
+  'Escalated- PS Team': 'Esc-PS',
+  'Escalated- PM Team': 'Esc-PM',
+  'Escalated- AM Team': 'Esc-AM',
+  'Escalated- Merchant': 'Esc - Merchant',
+  'Connection Problem or Invalid MMI Code': 'Connection Problem',
+  'Mismatch (Coupon Number & CST MSISDN)': 'Mismatch',
+};
+const LIVE_PROJECT_RENAME = { 'Red Ramadan': 'VF Red Ramadan' };
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+function parseCsv(text) {
+  const t = String(text == null ? '' : text).replace(/^\uFEFF/, '');
+  const rows = [];
+  let row = [], cell = '', inQ = false;
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (t[i + 1] === '"') { cell += '"'; i++; }
+        else inQ = false;
+      } else cell += ch;
+    } else if (ch === '"') inQ = true;
+    else if (ch === ',') { row.push(cell); cell = ''; }
+    else if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
+    else if (ch === '\r') {}
+    else cell += ch;
+  }
+  if (cell.length || row.length) { row.push(cell); rows.push(row); }
+  while (rows.length && rows[rows.length - 1].every((c) => c === '')) rows.pop();
+  if (!rows.length) return { cols: [], rows: [] };
+  return { cols: rows[0].map((c) => String(c == null ? '' : c).trim()), rows: rows.slice(1) };
+}
+
+async function fetchLiveTable(team) {
+  const url = 'https://docs.google.com/spreadsheets/d/' + LIVE_SHEET_ID + '/gviz/tq?tqx=out:csv&gid=' + LIVE_GIDS[team];
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error('Live sheet HTTP ' + res.status);
+  return parseCsv(await res.text());
+}
+
+function liveDateObj(v) {
+  if (v == null) return '';
+  const s = String(v);
+  const m = s.match(/\d{4}-\d{1,2}-\d{1,2}/);
+  if (m) return m[0].replace(/^(\d{4})-(\d{1,2})-(\d{1,2})$/, (_, y, mo, d) => y + '-' + pad2(mo) + '-' + pad2(d));
+  const dt = new Date(s);
+  return isNaN(dt.getTime()) ? '' : iso(dt);
+}
+
+function isDate(v) {
+  if (v == null) return false;
+  const s = String(v).trim();
+  if (!s) return false;
+  if (/\d{4}-\d{1,2}-\d{1,2}/.test(s)) return true;
+  if (!/[-/]/.test(s)) return false;
+  return !isNaN(new Date(s).getTime());
+}
+
+function applyLiveStatus(cols, rows) {
+  const ci = cols.indexOf('Closed time');
+  if (ci < 0) return { cols: cols.concat(['Ticket_Status']), rows: rows.map((r) => r.concat(['Open'])) };
+  return { cols: cols.concat(['Ticket_Status']), rows: rows.map((r) => r.concat([isDate(r[ci]) ? 'Closed' : 'Open'])) };
+}
+
+function applyLiveProjectRename(cols, rows) {
+  const pi = cols.indexOf('Project');
+  if (pi < 0) return { cols, rows };
+  return { cols, rows: rows.map((r) => {
+    if (r[pi] === 'Red Ramadan') { const nr = r.slice(); nr[pi] = 'VF Red Ramadan'; return nr; }
+    return r;
+  }) };
+}
+
+/* Mirrors pipeline/build_data.py::process_ticket_df — short-name renames,
+   date column detection, D_Obj derivation, blank-date row drop. */
+function processLiveTickets(cols, rows) {
+  let out = rows.filter((r) => String(r[0] == null ? '' : r[0]).trim() !== '');
+  let dateIdx = 0;
+  for (let i = 0; i < cols.length; i++) {
+    const c = cols[i].toLowerCase();
+    if (c.indexOf('created') >= 0 || c.indexOf('date') >= 0) { dateIdx = i; break; }
+  }
+  const parsed = [];
+  for (const r of out) {
+    const nr = r.map((v) => {
+      const key = String(v == null ? '' : v);
+      return LIVE_SHORT_NAMES[key] != null ? LIVE_SHORT_NAMES[key] : v;
+    });
+    const dObj = liveDateObj(nr[dateIdx]);
+    if (!dObj) continue;
+    nr.push(dObj);
+    parsed.push(nr);
+  }
+  const withStatus = applyLiveStatus(cols.concat(['D_Obj']), parsed);
+  return applyLiveProjectRename(withStatus.cols, withStatus.rows);
+}
+
+function mergeLiveTickets(a, b) {
+  const cols = a.cols.concat(['_team']);
+  for (const c of b.cols) if (cols.indexOf(c) < 0) cols.push(c);
+  const idx = {};
+  cols.forEach((c, i) => { idx[c] = i; });
+  const mapRows = (srcCols, srcRows, team) => srcRows.map((r) => {
+    const out = new Array(cols.length).fill('');
+    srcCols.forEach((c, i) => { if (idx[c] != null) out[idx[c]] = r[i]; });
+    out[idx['_team']] = team;
+    return out;
+  });
+  return { cols, rows: mapRows(a.cols, a.rows, 'merchant').concat(mapRows(b.cols, b.rows, 'client')) };
+}
+
+function liveStamp(tickets) {
+  const colsStr = tickets.cols.join(',');
+  let h = 0;
+  for (let i = 0; i < colsStr.length; i++) h = (h * 31 + colsStr.charCodeAt(i)) >>> 0;
+  const relCols = ['Ticket_Status', 'Closed time', 'Status', 'Action taken', 'Created time'];
+  const relIdx = relCols.map((c) => tickets.cols.indexOf(c)).filter((i) => i >= 0);
+  for (const r of tickets.rows) {
+    for (const i of relIdx) {
+      const cell = String(r[i] == null ? '' : r[i]);
+      for (let j = 0; j < cell.length; j++) h = (h * 33 + cell.charCodeAt(j)) >>> 0;
+      h = (h * 33 + 7) >>> 0;
+    }
+  }
+  return String(tickets.rows.length) + ':' + h;
+}
+
+function buildLiveMeta(tickets) {
+  const cols = tickets.cols;
+  const rows = tickets.rows;
+  const doj = cols.indexOf('D_Obj');
+  const teamI = cols.indexOf('_team');
+  let minD = '', maxD = '', mc = 0, cc = 0;
+  for (const r of rows) {
+    if (teamI >= 0 && r[teamI] === 'merchant') mc++; else cc++;
+    const d = doj >= 0 ? String(r[doj] || '') : '';
+    if (d) { if (!minD || d < minD) minD = d; if (!maxD || d > maxD) maxD = d; }
+  }
+  const filterCols = ['Merchant', 'Project', 'Branch User Name', 'District', 'Ticket type', 'Ticket subtype', 'Call Microtype', 'Action taken'];
+  const filters = {};
+  for (const c of filterCols) {
+    const ci = cols.indexOf(c);
+    const set = new Set();
+    if (ci >= 0) for (const r of rows) { const v = String(r[ci] == null ? '' : r[ci]).trim(); if (v) set.add(v); }
+    filters[c] = Array.from(set).sort();
+  }
+  return { counts: { merchant: mc, client: cc, all: rows.length }, date_min: minD, date_max: maxD, filters };
+}
+
+async function refreshLiveData() {
+  try {
+    const [m, c] = await Promise.all([fetchLiveTable('merchant'), fetchLiveTable('client')]);
+    const pm = processLiveTickets(m.cols, m.rows);
+    const pc = processLiveTickets(c.cols, c.rows);
+    const tickets = mergeLiveTickets(pm, pc);
+    const stamp = liveStamp(tickets);
+    if (stamp === S.liveStamp) return false;
+    S.liveStamp = stamp;
+    S.liveActive = true;
+    S.tickets = { cols: tickets.cols, rows: tickets.rows };
+    S.colIdx = {};
+    tickets.cols.forEach((c, i) => { S.colIdx[c] = i; });
+    const lm = buildLiveMeta(tickets);
+    const now = new Date();
+    const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    S.meta.counts = lm.counts;
+    S.meta.date_min = lm.date_min;
+    S.meta.date_max = lm.date_max;
+    S.meta.filters = lm.filters;
+    S.meta.updated = pad2(now.getDate()) + ' ' + MON[now.getMonth()] + ' ' + now.getFullYear() + ' ' + pad2(now.getHours()) + ':' + pad2(now.getMinutes());
+    S.meta.updated_iso = now.toISOString();
+    S.meta.source = 'live';
+    return true;
+  } catch (e) {
+    console.warn('Live sheet refresh failed — keeping bundled data', e);
+    return false;
+  }
 }
 
 /* ------------------------------ FILTER PIPELINE ------------------------------ */
@@ -1726,12 +1928,18 @@ function startAutoRefresh() {
   if (autoTimer) clearInterval(autoTimer);
   autoTimer = setInterval(async () => {
     try {
-      const meta = await fetchJson('data/meta.json', { bust: true });
-      if (meta && meta.updated_iso && meta.updated_iso !== S.build) {
-        await loadData(true);
-        renderAll();
-      }
-    } catch (e) { console.error('auto-refresh failed', e); }
+      const changed = await refreshLiveData();
+      if (changed) { renderAll(); return; }
+    } catch (e) { console.error('auto-refresh live failed', e); }
+    if (!S.liveActive) {
+      try {
+        const meta = await fetchJson('data/meta.json', { bust: true });
+        if (meta && meta.updated_iso && meta.updated_iso !== S.build) {
+          await loadData(true);
+          renderAll();
+        }
+      } catch (e) { console.error('auto-refresh bundled failed', e); }
+    }
   }, AUTO_REFRESH_MS);
 }
 
@@ -1870,6 +2078,7 @@ async function boot() {
     console.error(e);
     // try to load again — data may not be built yet
   }
+  await refreshLiveData();
   if (ensureFreshAssets()) return;
   renderAll();
   showLive();
