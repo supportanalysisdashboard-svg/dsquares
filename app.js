@@ -6,6 +6,15 @@
 /* ============================== CONFIG ============================== */
 const NAVY = '#002147', BLUE = '#0055A4', LIGHT = '#00AEEF', RED = '#FF4B4B', GREEN = '#00873d';
 const PIE_COLORS = ['#0055A4','#00AEEF','#16A34A','#F59E0B','#7C3AED','#EF4444','#0D9488','#DB2777','#65A30D','#0E7490'];
+const TYPE_SHARE_COLORS = {
+  'Technical issue': '#0066CC',
+  'Inquiry': '#0A2240',
+  'Connectivity': '#0088CC',
+  'Request': '#004C99',
+  'Others': '#80C4FF',
+  'Maintenance': '#4A90E2',
+  'Complaints': '#FF2D2D',
+};
 const BLACKLIST = new Set([
   '','n/a','n.a','n','dropped call','call dropped','out of our scope','other','0','na',' ',
   'N','none','nan','N/A','0.0','NaN','None','n/m','N/M',"what's app"
@@ -698,6 +707,47 @@ function pieSpec(title, items, colors, tooltipFn, hole) {
   };
 }
 
+function typeShareSpec(title, items, tooltipFn) {
+  const colors = items.map((x) => TYPE_SHARE_COLORS[x.name] || '#80C4FF');
+  const labelFmt = (p) => `${p.name}\n${p.percent == null ? '' : p.percent.toFixed(1) + '%'}`;
+  return {
+    tooltip: Object.assign({}, HOVER_STYLE, { formatter: tooltipFn || ((p) => `<b>${esc(p.name)}</b><br>${fmt(p.value)} (${p.percent == null ? '' : p.percent.toFixed(1) + '%'})`) }),
+    series: [{
+      type: 'pie', radius: ['25%', '75%'], center: ['42%', '50%'], data: items,
+      itemStyle: { borderRadius: 0, borderWidth: 4, borderColor: '#ffffff' },
+      label: {
+        show: true, position: 'inside', color: '#FFFFFF', fontSize: 12, fontWeight: 700,
+        rotate: 'auto', align: 'center', formatter: labelFmt,
+      },
+      labelLine: { show: false },
+      emphasis: {
+        itemStyle: { shadowBlur: 12, shadowColor: 'rgba(0,0,0,.35)' },
+        label: { show: true, position: 'inside', color: '#FFFFFF', fontWeight: 800, fontSize: 13, formatter: labelFmt },
+      },
+      color: colors,
+    }],
+    legend: {
+      orient: 'vertical', right: '10%', top: 'center',
+      icon: 'rect', itemWidth: 14, itemHeight: 14, itemGap: 14,
+      textStyle: { color: '#0A2240', fontSize: 12, fontWeight: 600 },
+      data: items.map((x) => x.name),
+    },
+    title: { text: title, left: 0, top: 4, textStyle: { fontFamily: 'Sora, sans-serif', fontSize: 14, color: NAVY, fontWeight: 700 } },
+    backgroundColor: 'transparent',
+  };
+}
+
+function typeShareCard(title, items, tooltipFn, onClick) {
+  const wrap = document.createElement('div');
+  wrap.className = 'chart-card';
+  const div = document.createElement('div');
+  div.className = 'chart';
+  wrap.appendChild(div);
+  const chart = mountChart(div, typeShareSpec(title, items, tooltipFn));
+  if (onClick) chart.on('click', (p) => { if (p.name != null) onClick(p.name); });
+  return wrap;
+}
+
 function barCard(title, items, baseColor, tooltipFn, onClick) {
   const wrap = document.createElement('div');
   wrap.className = 'chart-card';
@@ -1017,7 +1067,7 @@ function buildOverviewCharts(ffDrill, clientMode, isVf) {
       const p = groupTop(ffDrill, 'Project', 'Call Microtype', 5);
       if (p.length) charts.push({ title: '🏢 3. Top 10 Projects', type: 'bar', items: p, base: NAVY, tooltip: hoverHeader(), click: clickF('Project'), wide: false });
       const tt = topWithOthers(countBy(ffDrill, 'Ticket type', { clean: true }));
-      if (tt.length) charts.push({ title: '🎫 4. Ticket Type Share', type: 'pie', items: tt, click: clickF('Ticket type'), wide: false });
+      if (tt.length) charts.push({ title: '🎫 4. Ticket Type Share', type: 'pie', doughnut: true, wide: true, items: tt, click: clickF('Ticket type') });
       const su = groupTop(ffDrill, 'Ticket subtype', 'Ticket type', 3);
       if (su.length) charts.push({ title: '🏷️ 5. Top 10 Subtypes', type: 'bar', items: su, base: NAVY, tooltip: hoverHeader(), click: clickF('Ticket subtype'), wide: false });
       const mi = groupTop(ffDrill, 'Call Microtype', 'Ticket subtype', 5);
@@ -1044,7 +1094,7 @@ function buildOverviewCharts(ffDrill, clientMode, isVf) {
     const p = groupTop(ffDrill, 'Project', 'Call Microtype', 5);
     if (p.length) charts.push({ title: '🏢 3. Top 10 Projects', type: 'bar', items: p, base: NAVY, tooltip: hoverHeader(), click: clickF('Project'), wide: false });
     const tt = topWithOthers(countBy(ffDrill, 'Ticket type', { clean: true }));
-    if (tt.length) charts.push({ title: '🎫 4. Ticket Type Share', type: 'pie', items: tt, click: clickF('Ticket type'), wide: false });
+    if (tt.length) charts.push({ title: '🎫 4. Ticket Type Share', type: 'pie', doughnut: true, wide: true, items: tt, click: clickF('Ticket type') });
     const su = groupTop(ffDrill, 'Ticket subtype', 'Ticket type', 3);
     if (su.length) charts.push({ title: '🏷️ 5. Top 10 Subtypes', type: 'bar', items: su, base: NAVY, tooltip: hoverHeader(), click: clickF('Ticket subtype'), wide: false });
     const mi = groupTop(ffDrill, 'Call Microtype', 'Ticket subtype', 5);
@@ -1057,6 +1107,7 @@ function buildOverviewCharts(ffDrill, clientMode, isVf) {
 
 function renderChartCard(spec, idx) {
   if (spec.type === 'pie') {
+    if (spec.doughnut) return typeShareCard(spec.title, spec.items, spec.tooltip, spec.click);
     return pieCard(spec.title, spec.items, spec.tooltip, spec.click);
   }
   const hoverFn = spec.tooltip ? (p) => {
