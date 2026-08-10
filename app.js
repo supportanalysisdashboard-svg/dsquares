@@ -38,6 +38,7 @@ const S = {
   build: null,
   liveActive: false,
   liveStamp: null,
+  redLiveStamp: null,
 };
 
 /* ============================== HELPERS ============================== */
@@ -112,7 +113,7 @@ async function loadData(force) {
   showLoading('Loading quality data…');
   S.agent = await fetchJson('data/agent.json', opts);
   S.sla = await fetchJson('data/sla.json', opts);
-  S.redemption = await fetchJson('data/redemption.json', opts);
+  S.redemption = normalizeRedemption(await fetchJson('data/redemption.json', opts));
   hideLoading();
 }
 
@@ -314,6 +315,72 @@ async function refreshLiveData() {
     console.warn('Live sheet refresh failed — keeping bundled data', e);
     return false;
   }
+}
+
+/* ------------------------- REDEMPTION TRACKER (live) -------------------------
+   The Redemption Tracker tab holds pre-calculated values that must be shown
+   verbatim (not re-derived from raw tickets): a KPI row (Total Transactions |
+   Top Agent | Total Redemption Amount) and an Agent table. It is read from the
+   sheet's export endpoint because it preserves the exact cell layout (gviz
+   compacts blank rows away, which would break the A2/B2/C2 / A6:C10 mapping). */
+const LIVE_REDEMPTION_GID = 17439532;
+
+async function fetchRedemptionLive() {
+  const url = 'https://docs.google.com/spreadsheets/d/' + LIVE_SHEET_ID + '/export?format=csv&gid=' + LIVE_REDEMPTION_GID + '&_cb=' + Date.now();
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error('Redemption sheet HTTP ' + res.status);
+  return parseCsv(await res.text());
+}
+
+function structureRedemption(rows) {
+  const kpi = { txn: 'N/A', agent: '', value: 'N/A' };
+  const nonEmpty = rows.filter((r) => r.some((c) => String(c == null ? '' : c).trim() !== ''));
+  for (const r of nonEmpty) {
+    if (String(r[0] == null ? '' : r[0]).trim().slice(0, 1).match(/\d/)) {
+      kpi.txn = String(r[0] == null ? '' : r[0]).trim() || 'N/A';
+      kpi.agent = String(r[1] == null ? '' : r[1]).trim();
+      kpi.value = String(r[2] == null ? '' : r[2]).trim() || 'N/A';
+      break;
+    }
+  }
+  const agentRows = [];
+  const sub = nonEmpty.findIndex((r) => String(r[0] == null ? '' : r[0]).trim().toLowerCase() === 'agent');
+  for (let i = sub + 1; i < nonEmpty.length; i++) {
+    const r = nonEmpty[i];
+    const name = String(r[0] == null ? '' : r[0]).trim();
+    if (!name) continue;
+    agentRows.push([name, String(r[1] == null ? '' : r[1]).trim(), String(r[2] == null ? '' : r[2]).trim()]);
+  }
+  if (!kpi.agent && agentRows.length) kpi.agent = agentRows[0][0];
+  return { kpi, cols: ['Agent Name', 'Transaction Count', 'Total Redemption Value'], rows: agentRows };
+}
+
+function normalizeRedemption(raw) {
+  if (!raw) return null;
+  if (raw.kpi && raw.cols && raw.rows) return raw;
+  return structureRedemption(raw.rows || []);
+}
+
+async function refreshRedemptionLive() {
+  try {
+    const parsed = await fetchRedemptionLive();
+    const red = structureRedemption(parsed.rows);
+    const stamp = JSON.stringify([red.kpi.txn, red.kpi.agent, red.kpi.value, red.rows.length,
+      red.rows[0] ? red.rows[0].join('|') : '', red.rows[red.rows.length - 1] ? red.rows[red.rows.length - 1].join('|') : '']);
+    if (stamp === S.redLiveStamp) return false;
+    S.redLiveStamp = stamp;
+    red.source = 'live';
+    S.redemption = red;
+    return true;
+  } catch (e) {
+    console.warn('Live redemption refresh failed', e);
+    return false;
+  }
+}
+
+async function refreshLiveAll() {
+  const [a, b] = await Promise.all([refreshLiveData(), refreshRedemptionLive()]);
+  return a || b;
 }
 
 /* ------------------------------ FILTER PIPELINE ------------------------------ */
@@ -1115,8 +1182,8 @@ function renderTeamOverview(dataRows, opts) {
   } else {
     scRow.className = 'sc-row';
     let redVal = 'N/A';
-    if (S.redemption && S.redemption.cols.includes('Total Redemption Amount') && S.redemption.rows.length) {
-      redVal = fmt(Math.round(parseNum(S.redemption.rows[0][S.redemption.cols.indexOf('Total Redemption Amount')])));
+    if (S.redemption && S.redemption.kpi) {
+      redVal = parseNum(S.redemption.kpi.value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
     }
     scRow.innerHTML = cardHtml('📋 Total Tickets', fmt(dataLen), NAVY, analysis(dataLen, baseLen), false)
       + cardHtml('📞 Inbound Calls', fmt(inboundAll.length), BLUE, analysis(inboundAll.length, inboundBase.length), false)
@@ -1616,19 +1683,13 @@ function renderRedemption() {
   const content = $('#content');
   content.innerHTML = `<div class="page-title">💰 Redemption Tracker</div>`;
   const red = S.redemption;
-  if (!red || !red.cols.length || !red.rows.length) {
+  if (!red || !red.kpi) {
     content.insertAdjacentHTML('beforeend', '<div class="empty-msg">No Redemption data available</div>');
     return;
   }
-  const first = red.rows[0] || [];
-  const ci = {
-    txn: red.cols.indexOf('Total Transactions'),
-    agent: red.cols.indexOf('Top Agent'),
-    val: red.cols.indexOf('Total Redemption Amount'),
-  };
-  const totalTxn = ci.txn >= 0 ? fmt(Math.round(parseNum(first[ci.txn]))) : 'N/A';
-  const topAgent = ci.agent >= 0 && first[ci.agent] ? cleanVal(first[ci.agent]) : 'N/A';
-  const totalVal = ci.val >= 0 ? fmt(Math.round(parseNum(first[ci.val]))) : 'N/A';
+  const totalTxn = fmt(parseNum(red.kpi.txn));
+  const topAgent = red.kpi.agent ? cleanVal(red.kpi.agent) : 'N/A';
+  const totalVal = parseNum(red.kpi.value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
   const mgrid = document.createElement('div');
   mgrid.className = 'mgrid3';
@@ -1638,10 +1699,12 @@ function renderRedemption() {
      <div class="mcard" style="--c:${LIGHT};"><div class="ml">💰 Total Redemption Amount</div><div class="mv">${totalVal}</div></div>`;
   content.appendChild(mgrid);
 
-  const tblWrap = document.createElement('div');
-  tblWrap.className = 'table-wrap';
-  tblWrap.innerHTML = renderTable(red.cols, red.rows);
-  content.appendChild(tblWrap);
+  if (red.rows.length) {
+    const tblWrap = document.createElement('div');
+    tblWrap.className = 'table-wrap';
+    tblWrap.innerHTML = renderTable(red.cols, red.rows);
+    content.appendChild(tblWrap);
+  }
 }
 
 /* ============================== TICKET EXPLORER ============================== */
@@ -1928,7 +1991,7 @@ function startAutoRefresh() {
   if (autoTimer) clearInterval(autoTimer);
   autoTimer = setInterval(async () => {
     try {
-      const changed = await refreshLiveData();
+      const changed = await refreshLiveAll();
       if (changed) { renderAll(); return; }
     } catch (e) { console.error('auto-refresh live failed', e); }
     if (!S.liveActive) {
@@ -2078,7 +2141,7 @@ async function boot() {
     console.error(e);
     // try to load again — data may not be built yet
   }
-  await refreshLiveData();
+  await refreshLiveAll();
   if (ensureFreshAssets()) return;
   renderAll();
   showLive();

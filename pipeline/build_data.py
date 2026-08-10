@@ -261,6 +261,31 @@ def build_agent(raw):
     return {"summary": summary, "per_agent": per_agent, "raw": rows_to_columnar(raw)}
 
 
+def structure_redemption(raw):
+    """Parse the pre-calculated Redemption Tracker sheet — a title row, a KPI row
+    (Total Transactions | Top Agent | Total Redemption Amount), then an Agent
+    table (Agent | Transaction Count | Total Redemption Value) — into
+    {kpi, cols, rows} instead of dumping the raw sheet. Layout is located by
+    content (first numeric row, a row whose first cell is 'Agent') so it keeps
+    working if blank rows are added above the agent table."""
+    matrix = [list(raw.columns)] + [list(r) for r in raw.itertuples(index=False)]
+    nonempty = [[(str(c).strip() if c is not None else "") for c in r] for r in matrix if any(str(c).strip() for c in r)]
+    kpi = {"txn": "N/A", "agent": "", "value": "N/A"}
+    for r in nonempty:
+        if len(r) >= 3 and r[0][:1].isdigit():
+            kpi = {"txn": r[0] or "N/A", "agent": r[1].strip(), "value": r[2] or "N/A"}
+            break
+    agent_rows = []
+    sub = next((i for i, r in enumerate(nonempty) if r and r[0].strip().lower() == "agent"), -1)
+    for r in nonempty[sub + 1:]:
+        if not r or not r[0].strip():
+            continue
+        agent_rows.append([r[0].strip(), r[1].strip() if len(r) > 1 else "", r[2].strip() if len(r) > 2 else ""])
+    if not kpi["agent"] and agent_rows:
+        kpi["agent"] = agent_rows[0][0]
+    return {"kpi": kpi, "cols": ["Agent Name", "Transaction Count", "Total Redemption Value"], "rows": agent_rows, "source": "pipeline"}
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     print(f"Output dir: {OUT}")
@@ -326,7 +351,7 @@ def main():
 
     agent = build_agent(raw["agent_perf"])
     sla = rows_to_columnar(raw["inbound_sla"])
-    redemption = rows_to_columnar(raw["redemption"])
+    redemption = structure_redemption(raw["redemption"])
 
     def write_json(name, obj, gzip_level=9):
         path = os.path.join(OUT, name)
