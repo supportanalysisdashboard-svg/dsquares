@@ -686,8 +686,8 @@ function contrastText(hex) {
   return lum > 0.55 ? NAVY : '#fff';
 }
 
-function pieSpec(title, items, colors, tooltipFn, hole) {
-  const pieLabelColor = (p) => contrastText(p && p.color);
+function pieSpec(title, items, colors, tooltipFn, hole, labelColor) {
+  const pieLabelColor = labelColor || ((p) => contrastText(p && p.color));
   return {
     tooltip: Object.assign({}, HOVER_STYLE, { formatter: tooltipFn || ((p) => `<b>${esc(p.name)}</b><br>${fmt(p.value)} (${p.percent == null ? '' : p.percent.toFixed(1) + '%'})`) }),
     series: [{
@@ -1067,7 +1067,7 @@ function buildOverviewCharts(ffDrill, clientMode, isVf) {
       const p = groupTop(ffDrill, 'Project', 'Call Microtype', 5);
       if (p.length) charts.push({ title: '🏢 3. Top 10 Projects', type: 'bar', items: p, base: NAVY, tooltip: hoverHeader(), click: clickF('Project'), wide: false });
       const tt = topWithOthers(countBy(ffDrill, 'Ticket type', { clean: true }));
-      if (tt.length) charts.push({ title: '🎫 4. Ticket Type Share', type: 'pie', doughnut: true, wide: true, items: tt, click: clickF('Ticket type') });
+      if (tt.length) charts.push({ title: '🎫 4. Ticket Type Share', type: 'pie', doughnut: true, items: tt, click: clickF('Ticket type') });
       const su = groupTop(ffDrill, 'Ticket subtype', 'Ticket type', 3);
       if (su.length) charts.push({ title: '🏷️ 5. Top 10 Subtypes', type: 'bar', items: su, base: NAVY, tooltip: hoverHeader(), click: clickF('Ticket subtype'), wide: false });
       const mi = groupTop(ffDrill, 'Call Microtype', 'Ticket subtype', 5);
@@ -1094,7 +1094,7 @@ function buildOverviewCharts(ffDrill, clientMode, isVf) {
     const p = groupTop(ffDrill, 'Project', 'Call Microtype', 5);
     if (p.length) charts.push({ title: '🏢 3. Top 10 Projects', type: 'bar', items: p, base: NAVY, tooltip: hoverHeader(), click: clickF('Project'), wide: false });
     const tt = topWithOthers(countBy(ffDrill, 'Ticket type', { clean: true }));
-    if (tt.length) charts.push({ title: '🎫 4. Ticket Type Share', type: 'pie', doughnut: true, wide: true, items: tt, click: clickF('Ticket type') });
+    if (tt.length) charts.push({ title: '🎫 4. Ticket Type Share', type: 'pie', doughnut: true, items: tt, click: clickF('Ticket type') });
     const su = groupTop(ffDrill, 'Ticket subtype', 'Ticket type', 3);
     if (su.length) charts.push({ title: '🏷️ 5. Top 10 Subtypes', type: 'bar', items: su, base: NAVY, tooltip: hoverHeader(), click: clickF('Ticket subtype'), wide: false });
     const mi = groupTop(ffDrill, 'Call Microtype', 'Ticket subtype', 5);
@@ -1160,7 +1160,7 @@ function renderStatusPie(ffDrill, onClick) {
   wrap.appendChild(div);
   const chart = mountChart(div, pieSpec('🎫 Live Ticket Status', items, colors, (p) => {
     return `<b>${esc(p.name)}</b><br>${fmt(p.value)}<br>${p.percent == null ? '' : p.percent.toFixed(2) + '%'}<br><br><b>Top Actions:</b><br>${p.data.hover || 'No actions'}`;
-  }));
+  }, false, '#FFFFFF'));
   if (onClick) chart.on('click', (p) => { if (p.name === 'Open' || p.name === 'Closed') onClick(p.name); });
   return wrap;
 }
