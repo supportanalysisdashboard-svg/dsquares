@@ -5,17 +5,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Support Analysis Dashboard</title>
 <link rel="icon" type="image/png" href="assets/logo_small.png">
-<script>window.DS_BUILD='20260810161000';</script>
+<script>window.DS_BUILD='20260810163000';</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;900&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=20260810161000">
+<link rel="stylesheet" href="styles.css?v=20260810163000">
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 </head>
 <body>
 
 <!-- ============ LOGIN SCREEN ============ -->
 <div id="login-screen" class="lp-screen" hidden>
+  <div class="topbar">
+    <div class="mark">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="3" y="3" width="8" height="8" rx="2" fill="#22d3ee"/>
+        <rect x="13" y="3" width="8" height="8" rx="2" fill="#2f6fed"/>
+        <rect x="13" y="13" width="8" height="8" rx="2" fill="#22d3ee"/>
+        <rect x="3" y="13" width="8" height="8" rx="2" fill="#2f6fed" opacity="0.6"/>
+      </svg>
+    </div>
+  </div>
   <div class="lp-bg"></div>
   <div class="lp-grid"></div>
   <div class="lp-orb lp-orb1"></div>
@@ -38,7 +48,15 @@
 </div>
 
 <!-- ============ LOADING OVERLAY ============ -->
-<div id="loading-screen" class="ds-loading-screen" hidden>
+<div id="loading-screen" class="ds-loading-screen">
+  <div class="mark ds-loading-mark">
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="3" y="3" width="8" height="8" rx="2" fill="#22d3ee"/>
+      <rect x="13" y="3" width="8" height="8" rx="2" fill="#2f6fed"/>
+      <rect x="13" y="13" width="8" height="8" rx="2" fill="#22d3ee"/>
+      <rect x="3" y="13" width="8" height="8" rx="2" fill="#2f6fed" opacity="0.6"/>
+    </svg>
+  </div>
   <div class="ds-loading-title">Support Analysis Dashboard</div>
   <div class="ds-loading-sub">Preparing your dashboard &mdash; first load only, it stays fast afterwards.</div>
   <div class="ds-spinner"></div>
@@ -56,8 +74,9 @@
   </main>
 </div>
 
-<script src="app.js?v=20260810161000"></script>
+<script src="app.js?v=20260810163000"></script>
 </body>
 </html>
+
 
 

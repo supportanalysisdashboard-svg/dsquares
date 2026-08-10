@@ -123,7 +123,6 @@ async function loadData(force) {
   S.agent = await fetchJson('data/agent.json', opts);
   S.sla = await fetchJson('data/sla.json', opts);
   S.redemption = normalizeRedemption(await fetchJson('data/redemption.json', opts));
-  hideLoading();
 }
 
 /* ============================== LIVE MODE ==============================
@@ -2184,8 +2183,7 @@ async function boot() {
   S.ovTeam = 0;
   S.drill = { merchant: null, client: null };
   S.slideshow = false;
-  $('#login-screen').hidden = true;
-  $('#app').hidden = false;
+  showLoading('Loading…');
   try {
     await loadData(false);
   } catch (e) {
@@ -2197,6 +2195,7 @@ async function boot() {
   renderAll();
   showLive();
   startAutoRefresh();
+  hideLoading();
 }
 
 async function init() {
@@ -2211,12 +2210,19 @@ async function init() {
       resizeChartsSoon();
     });
   }
-  S.authBase = await fetchJson('access.json');
-  S.auth = mergeAuth(S.authBase);
+  // Render the shell immediately (before any network fetch) so the screen is
+  // never blank: returning users see the themed loader, everyone else the login.
+  let saved = null;
+  try { saved = localStorage.getItem('ds_session'); } catch (e) {}
+  if (saved) showLoading('Signing you in…');
+  else showLogin();
+
   $('#login-btn').addEventListener('click', submitLogin);
   $('#login-key').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitLogin(); });
 
-  const saved = localStorage.getItem('ds_session');
+  S.authBase = await fetchJson('access.json');
+  S.auth = mergeAuth(S.authBase);
+
   if (saved) {
     try {
       const sess = JSON.parse(saved);

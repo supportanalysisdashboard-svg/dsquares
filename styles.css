@@ -7,6 +7,7 @@
   --bg:linear-gradient(160deg,#f0f4ff 0%,#f8faff 60%,#eef6ff 100%);
 }
 *{box-sizing:border-box;margin:0;padding:0;}
+html{background:#f4f7fc;}
 html,body{height:100%;}
 body{
   font-family:'DM Sans',sans-serif;
@@ -22,6 +23,13 @@ body{
   background:#000e20!important;
   overflow:hidden;
 }
+.topbar{
+  position:fixed;top:18px;left:20px;z-index:3;
+  display:flex;align-items:center;gap:10px;
+  animation:fadeDown .6s ease both;
+}
+.mark{width:32px;height:32px;flex-shrink:0;}
+.mark svg{width:100%;height:100%;display:block;filter:drop-shadow(0 4px 14px rgba(34,211,238,.35));}
 .lp-bg{
   position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;
   background:
@@ -106,15 +114,19 @@ body{
 
 /* ────────────────── LOADING ────────────────── */
 .ds-loading-screen{
-  position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;background:#fff;
+  position:fixed;inset:0;z-index:9999;
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 20%,rgba(0,174,239,.14) 0%,transparent 60%),
+    linear-gradient(160deg,#000e20 0%,#001535 45%,#001f50 100%);
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   text-align:center;font-family:'DM Sans',sans-serif;
 }
-.ds-loading-title{font-family:'Sora',sans-serif;font-size:26px;font-weight:900;color:#002147;margin-bottom:6px;}
-.ds-loading-sub{font-size:12px;color:#888;margin-bottom:26px;letter-spacing:.5px;max-width:320px;}
-.ds-spinner{width:88px;height:88px;border:4px solid rgba(0,85,164,.15);border-top-color:#0055A4;border-radius:50%;animation:ds-spin 1s linear infinite;}
+.ds-loading-mark{width:44px;height:44px;margin-bottom:18px;animation:cardIn .6s ease both;}
+.ds-loading-title{font-family:'Sora',sans-serif;font-size:24px;font-weight:900;color:#fff;margin-bottom:6px;text-shadow:0 0 40px rgba(0,174,239,.25);}
+.ds-loading-sub{font-size:12px;color:rgba(255,255,255,.5);margin-bottom:26px;letter-spacing:.5px;max-width:340px;}
+.ds-spinner{width:88px;height:88px;border:4px solid rgba(0,174,239,.16);border-top-color:#00AEEF;border-radius:50%;animation:ds-spin 1s linear infinite;box-shadow:0 0 40px rgba(0,174,239,.15);}
 @keyframes ds-spin{to{transform:rotate(360deg);}}
-.ds-loading-status{margin-top:18px;font-size:11px;color:#aaa;letter-spacing:.5px;}
+.ds-loading-status{margin-top:18px;font-size:11px;color:rgba(255,255,255,.45);letter-spacing:.5px;}
 
 /* ────────────────── APP LAYOUT ────────────────── */
 .app{display:flex;min-height:100vh;}
