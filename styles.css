@@ -406,6 +406,7 @@ body{
 .ov-alert-ico{font-size:24px;line-height:1;}
 .ov-alert b{font-size:15px;font-weight:900;color:#00873d;font-family:'Sora',sans-serif;}
 .ov-alert span:not(.ov-alert-ico){font-size:12px;font-weight:700;color:#00873d;}
+.ov-alert-list{display:block;margin-top:3px;font-size:11.5px;font-weight:600;color:#00873d;opacity:.85;}
 .asana-alert{
   display:flex;align-items:center;gap:12px;
   background:linear-gradient(135deg,rgba(255,75,75,.12),rgba(200,30,30,.10));
