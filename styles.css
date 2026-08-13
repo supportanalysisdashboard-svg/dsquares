@@ -395,6 +395,17 @@ body{
 @media(max-width:480px){.mgrid5{grid-template-columns:1fr;}}
 
 /* ────────────────── ASANA TRACKER ────────────────── */
+.ov-alert{
+  display:flex;align-items:center;gap:12px;
+  background:linear-gradient(135deg,rgba(0,135,61,.12),rgba(0,174,239,.08));
+  border:1.5px solid rgba(0,135,61,.5);border-left:6px solid #00873d;
+  border-radius:14px;padding:14px 18px;
+  box-shadow:0 6px 22px rgba(0,135,61,.15);
+  animation:asAlertIn .5s cubic-bezier(.18,.89,.32,1.28) both;
+}
+.ov-alert-ico{font-size:24px;line-height:1;}
+.ov-alert b{font-size:15px;font-weight:900;color:#00873d;font-family:'Sora',sans-serif;}
+.ov-alert span:not(.ov-alert-ico){font-size:12px;font-weight:700;color:#00873d;}
 .asana-alert{
   display:flex;align-items:center;gap:12px;
   background:linear-gradient(135deg,rgba(255,75,75,.12),rgba(200,30,30,.10));

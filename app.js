@@ -53,6 +53,8 @@ const S = {
   liveStamp: null,
   finLiveStamp: null,
   asaLiveStamp: null,
+  ticketStatuses: null,        // baseline map (team|id -> status) for newly-closed diff
+  newlyClosed: null,           // ticket ids closed since last live refresh
 };
 
 /* ============================== HELPERS ============================== */
@@ -311,6 +313,43 @@ async function refreshLiveData() {
     const stamp = liveStamp(tickets);
     if (stamp === S.liveStamp) return false;
     S.liveStamp = stamp;
+
+    // detect tickets newly closed since the last live refresh
+    S.newlyClosed = null;
+    if (S.tickets && S.tickets.rows && S.ticketStatuses) {
+      const tIdIdx = tickets.cols.indexOf('Ticket ID');
+      const stIdx = tickets.cols.indexOf('Ticket_Status');
+      const teamIdx = tickets.cols.indexOf('_team');
+      if (tIdIdx >= 0 && stIdx >= 0) {
+        const newSt = new Map();
+        for (const r of tickets.rows) {
+          const id = String(r[tIdIdx] == null ? '' : r[tIdIdx]).trim();
+          const team = teamIdx >= 0 ? String(r[teamIdx] == null ? '' : r[teamIdx]).trim() : '';
+          if (id) newSt.set(team + '|' + id, String(r[stIdx] == null ? '' : r[stIdx]).trim().toLowerCase());
+        }
+        const newly = [];
+        for (const [key, st] of newSt) {
+          const prev = S.ticketStatuses.get(key);
+          if (prev && prev !== 'closed' && st === 'closed') newly.push(key);
+        }
+        if (newly.length) S.newlyClosed = newly;
+      }
+    }
+    const nextStatuses = new Map();
+    {
+      const tIdIdx = tickets.cols.indexOf('Ticket ID');
+      const stIdx = tickets.cols.indexOf('Ticket_Status');
+      const teamIdx = tickets.cols.indexOf('_team');
+      if (tIdIdx >= 0 && stIdx >= 0) {
+        for (const r of tickets.rows) {
+          const id = String(r[tIdIdx] == null ? '' : r[tIdIdx]).trim();
+          const team = teamIdx >= 0 ? String(r[teamIdx] == null ? '' : r[teamIdx]).trim() : '';
+          if (id) nextStatuses.set(team + '|' + id, String(r[stIdx] == null ? '' : r[stIdx]).trim().toLowerCase());
+        }
+      }
+    }
+    S.ticketStatuses = nextStatuses;
+
     S.liveActive = true;
     S.tickets = { cols: tickets.cols, rows: tickets.rows };
     S.colIdx = {};
@@ -861,7 +900,10 @@ const MSEL_LABEL = { merchant:'🏪 Merchant', project:'🏢 Project', branch:'�
 const MSEL_COL = { merchant:'Merchant', project:'Project', branch:'Branch User Name', district:'District', type:'Ticket type', subtype:'Ticket subtype', microtype:'Call Microtype', action:'Action taken', status:'Ticket_Status' };
 
 function mselOptionsHtml(name, colName, selected, search) {
-  const opts = colName ? cleanedUnique(S.ffBase, colName) : [];
+  let opts = colName ? cleanedUnique(S.ffBase, colName) : [];
+  if (name === 'project' && S.session && S.session.role === 'client' && S.session.is_vodafone && opts.indexOf('VF Marketplace') < 0) {
+    opts = opts.concat(['VF Marketplace']).sort();
+  }
   const q = (search || '').toLowerCase();
   const filtered = opts.filter((o) => o.toLowerCase().includes(q));
   const optsHtml = filtered.map((o) => {
@@ -1258,6 +1300,20 @@ function renderStatusPie(ffDrill, onClick) {
   return wrap;
 }
 
+function newlyClosedInView(rows) {
+  const set = new Set(S.newlyClosed || []);
+  const tIdI = col('Ticket ID');
+  const teamI = col('_team');
+  if (tIdI == null || !set.size) return 0;
+  let n = 0;
+  for (const r of rows) {
+    const id = cleanVal(r[tIdI]);
+    const team = teamI != null ? cleanVal(r[teamI]) : '';
+    if (id && set.has(team + '|' + id)) n++;
+  }
+  return n;
+}
+
 function renderTeamOverview(dataRows, opts) {
   const { clientMode, drillTab, teamKey } = opts; // clientMode: false|true|'client'
   const content = $('#content');
@@ -1362,7 +1418,15 @@ function renderTeamOverview(dataRows, opts) {
     const statusCard = renderStatusPie(ffDrill, (s) => applyClickFilter('Ticket_Status', s));
     if (statusCard) {
       const statusWrap = document.createElement('div');
-      statusWrap.style.cssText = 'display:flex;justify-content:center;';
+      statusWrap.style.cssText = 'display:flex;justify-content:center;align-items:center;flex-direction:column;gap:12px;';
+      const newlyN = S.newlyClosed && S.newlyClosed.length ? newlyClosedInView(ffDrill) : 0;
+      if (newlyN > 0) {
+        const al = document.createElement('div');
+        al.className = 'ov-alert ok';
+        al.innerHTML = `<span class="ov-alert-ico">✅</span>
+          <div><b>${fmt(newlyN)} ticket${newlyN === 1 ? '' : 's'} closed since last check</b></div>`;
+        statusWrap.appendChild(al);
+      }
       statusCard.style.width = 'min(560px,100%)';
       statusWrap.appendChild(statusCard);
       frag.appendChild(statusWrap);
