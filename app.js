@@ -2002,7 +2002,7 @@ function renderAsana() {
     const linkI = as.cols.indexOf('Asana Link');
     const assigneeI = as.cols.indexOf('Assignee');
     const createdI = as.cols.indexOf('Created At');
-    const headers = ['🏷️ Task Name', '🎫 Ticket ID', '🧑‍💼 Assignee', '📅 Created', '⏰ Due Date', '🔢 Working Days', '📌 Task Status'];
+    const headers = ['🏷️ Task Name', '🎫 Ticket ID', '🧑‍💼 Assignee', '📅 Created', '⏰ Due Date', '🔢 Working Days'];
     const cells = filtered.map((x) => [
       x.name,
       tIdI >= 0 ? x.r[tIdI] : '',
@@ -2010,7 +2010,6 @@ function renderAsana() {
       createdI >= 0 ? x.r[createdI] : '',
       dueI >= 0 ? x.r[dueI] : '',
       wdI >= 0 ? x.r[wdI] : '',
-      `<span class="asana-st asana-st-${x.status.toLowerCase().replace(/[^a-z]/g, '')}">${esc(x.status)}</span>`,
     ]);
     const rawIdx = [];
     if (linkI >= 0) {
