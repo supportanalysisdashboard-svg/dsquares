@@ -13,6 +13,8 @@ Outputs:
   web/data/agent.json     agent_perf sheet (cols + rows)
   web/data/sla.json       inbound_sla sheet (cols + rows)
   web/data/redemption.json redemption sheet (cols + rows)
+  web/data/financial.json  financial actions sheet (cards + cols + rows)
+  web/data/asana.json      asana tracker sheet (cols + rows)
 """
 
 import concurrent.futures
@@ -36,6 +38,8 @@ SHEET_GIDS = {
     "agent_perf": 1306770575,
     "inbound_sla": 1713632809,
     "redemption": 17439532,
+    "financial_actions": 1458710714,
+    "asana_tracker": 1460146783,
 }
 
 BLACK_LIST = ['', 'n/a', 'n.a', 'n', 'dropped call', 'call dropped', 'out of our scope', 'other', '0', 'na', ' ', 'N', 'none', 'nan', 'N/A', '0.0', 'NaN', 'None', 'n/m', 'N/M', "what's app"]
@@ -286,12 +290,32 @@ def structure_redemption(raw):
     return {"kpi": kpi, "cols": ["Agent Name", "Transaction Count", "Total Redemption Value"], "rows": agent_rows, "source": "pipeline"}
 
 
+def structure_financial(raw):
+    """Parse the Financial Actions sheet (Sheet Name | Total | Status) into
+    {cards, cols, rows} for the Financial Actions dashboard tab."""
+    matrix = [list(raw.columns)] + [list(r) for r in raw.itertuples(index=False)]
+    cards = []
+    clean_rows = []
+    for r in matrix:
+        cells = [(str(c).strip() if c is not None else "") for c in r]
+        if not any(cells):
+            continue
+        name = cells[0]
+        if not name or name.lower() == "sheet name":
+            continue
+        total = cells[1] if len(cells) > 1 else ""
+        status = cells[2] if len(cells) > 2 else ""
+        cards.append({"name": name, "total": total, "status": status})
+        clean_rows.append([name, total, status])
+    return {"cards": cards, "cols": ["Sheet Name", "Total", "Status"], "rows": clean_rows, "source": "pipeline"}
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     print(f"Output dir: {OUT}")
 
     keys = list(SHEET_GIDS.keys())
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         futs = {pool.submit(load_csv, SHEET_GIDS[k]): k for k in keys}
         raw = {}
         for f in concurrent.futures.as_completed(futs):
@@ -352,6 +376,8 @@ def main():
     agent = build_agent(raw["agent_perf"])
     sla = rows_to_columnar(raw["inbound_sla"])
     redemption = structure_redemption(raw["redemption"])
+    financial = structure_financial(raw["financial_actions"])
+    asana = rows_to_columnar(raw["asana_tracker"])
 
     def write_json(name, obj, gzip_level=9):
         path = os.path.join(OUT, name)
@@ -373,6 +399,8 @@ def main():
     sizes["agent.json"] = write_json("agent.json", agent)
     sizes["sla.json"] = write_json("sla.json", sla)
     sizes["redemption.json"] = write_json("redemption.json", redemption)
+    sizes["financial.json"] = write_json("financial.json", financial)
+    sizes["asana.json"] = write_json("asana.json", asana)
 
     total = sum(s[0] for s in sizes.values())
     total_gz = sum(s[1] for s in sizes.values())

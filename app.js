@@ -21,7 +21,11 @@ const BLACKLIST = new Set([
 ]);
 const DATE_PRESETS = ['Last 3 months','Last 6 months','Last 12 months','All time','Custom range'];
 const EXP_PAGE_SIZE = 100;
-const TAB_EMOJI = {Overview:'🏠','Quality Board':'🏆','WhatsApp MOM':'💬','Inbound SLA':'📈','Redemption Tracker':'💰','Ticket Explorer':'🎫'};
+const ASANA_LOGO_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" style="vertical-align:-2px;flex-shrink:0;">' +
+  '<path d="M12 2.5l4.5 4.5L12 11.5 7.5 7z" fill="#F06A6A"/>' +
+  '<path d="M6 15l4.5 4.5L6 24 1.5 19.5z" fill="#00C6AE"/>' +
+  '<path d="M18 15l4.5 4.5L18 24l-4.5-4.5z" fill="#B068FF"/></svg>';
+const TAB_EMOJI = {Overview:'🏠','WhatsApp MOM':'💬','Inbound SLA':'📈','Quality Board':'🏆','Financial Actions':'💰','Asana Tracker':ASANA_LOGO_SVG,'Ticket Explorer':'🎫'};
 const HOVER_STYLE = { backgroundColor:'#001e42', borderColor:'#00AEEF', textStyle:{color:'#fff', fontSize:12, fontFamily:'DM Sans'} };
 
 /* ============================== STATE ============================== */
@@ -32,7 +36,7 @@ const S = {
   meta: null,
   tickets: null,               // {cols, rows}
   colIdx: {},
-  agent: null, sla: null, redemption: null,
+  agent: null, sla: null, redemption: null, financial: null, asana: null, asanaPrevOverdue: null,
   filters: { dateMode:null, customStart:null, customEnd:null,
              merchant:[], project:[], branch:[], district:[], type:[], subtype:[], microtype:[], action:[], status:[] },
   fSearch: {},
@@ -47,7 +51,8 @@ const S = {
   build: null,
   liveActive: false,
   liveStamp: null,
-  redLiveStamp: null,
+  finLiveStamp: null,
+  asaLiveStamp: null,
 };
 
 /* ============================== HELPERS ============================== */
@@ -123,6 +128,8 @@ async function loadData(force) {
   S.agent = await fetchJson('data/agent.json', opts);
   S.sla = await fetchJson('data/sla.json', opts);
   S.redemption = normalizeRedemption(await fetchJson('data/redemption.json', opts));
+  S.financial = normalizeFinancial(await fetchJson('data/financial.json', opts));
+  S.asana = await fetchJson('data/asana.json', opts);
 }
 
 /* ============================== LIVE MODE ==============================
@@ -325,19 +332,20 @@ async function refreshLiveData() {
   }
 }
 
-/* ------------------------- REDEMPTION TRACKER (live) -------------------------
-   The Redemption Tracker tab holds pre-calculated values that must be shown
-   verbatim (not re-derived from raw tickets): a KPI row (Total Transactions |
-   Top Agent | Total Redemption Amount) and an Agent table. It is read from the
-   sheet's export endpoint because it preserves the exact cell layout (gviz
-   compacts blank rows away, which would break the A2/B2/C2 / A6:C10 mapping). */
-const LIVE_REDEMPTION_GID = 17439532;
+/* ------------------------- FINANCIAL ACTIONS + ASANA (live) -------------------------
+   Financial Actions (per-sheet totals/status) and Asana Tracker (task list) are
+   read straight from their sheet tabs via the export endpoint, which preserves the
+   exact cell layout (gviz compacts blank rows away). Falls back to the bundled
+   data (web/data/*) whenever Google is unreachable. */
+const LIVE_FINANCIAL_GID = 1458710714;
+const LIVE_ASANA_GID = 1460146783;
 
-async function fetchRedemptionLive() {
-  const url = 'https://docs.google.com/spreadsheets/d/' + LIVE_SHEET_ID + '/export?format=csv&gid=' + LIVE_REDEMPTION_GID + '&_cb=' + Date.now();
-  const res = await fetch(url, { cache: 'no-store' });
-  if (!res.ok) throw new Error('Redemption sheet HTTP ' + res.status);
-  return parseCsv(await res.text());
+function fetchSheetCsv(gid) {
+  const url = 'https://docs.google.com/spreadsheets/d/' + LIVE_SHEET_ID + '/export?format=csv&gid=' + gid + '&_cb=' + Date.now();
+  return fetch(url, { cache: 'no-store' }).then((res) => {
+    if (!res.ok) throw new Error('Sheet HTTP ' + res.status);
+    return res.text();
+  });
 }
 
 function structureRedemption(rows) {
@@ -369,26 +377,54 @@ function normalizeRedemption(raw) {
   return structureRedemption(raw.rows || []);
 }
 
-async function refreshRedemptionLive() {
-  try {
-    const parsed = await fetchRedemptionLive();
-    const red = structureRedemption(parsed.rows);
-    const stamp = JSON.stringify([red.kpi.txn, red.kpi.agent, red.kpi.value, red.rows.length,
-      red.rows[0] ? red.rows[0].join('|') : '', red.rows[red.rows.length - 1] ? red.rows[red.rows.length - 1].join('|') : '']);
-    if (stamp === S.redLiveStamp) return false;
-    S.redLiveStamp = stamp;
-    red.source = 'live';
-    S.redemption = red;
-    return true;
-  } catch (e) {
-    console.warn('Live redemption refresh failed', e);
-    return false;
+function structureFinancial(rows) {
+  const cards = [];
+  const cleanRows = [];
+  for (const r of rows) {
+    if (!r.some((c) => String(c == null ? '' : c).trim() !== '')) continue;
+    const name = String(r[0] == null ? '' : r[0]).trim();
+    if (!name || /sheet name/i.test(name)) continue;
+    cards.push({ name, total: String(r[1] == null ? '' : r[1]).trim(), status: String(r[2] == null ? '' : r[2]).trim() });
+    cleanRows.push([name, String(r[1] == null ? '' : r[1]).trim(), String(r[2] == null ? '' : r[2]).trim()]);
   }
+  return { cards, cols: ['Sheet Name', 'Total', 'Status'], rows: cleanRows };
+}
+
+function normalizeFinancial(raw) {
+  if (!raw) return null;
+  if (raw.cards && raw.cols && raw.rows) return raw;
+  return structureFinancial(raw.rows || []);
+}
+
+async function refreshFinancialLive() {
+  try {
+    const text = await fetchSheetCsv(LIVE_FINANCIAL_GID);
+    const fin = structureFinancial(parseCsv(text).rows);
+    const stamp = JSON.stringify(fin.cards.map((c) => c.name + '|' + c.total + '|' + c.status).join(';'));
+    if (stamp === S.finLiveStamp) return false;
+    S.finLiveStamp = stamp;
+    fin.source = 'live';
+    S.financial = fin;
+    return true;
+  } catch (e) { console.warn('Live financial refresh failed', e); return false; }
+}
+
+async function refreshAsanaLive() {
+  try {
+    const text = await fetchSheetCsv(LIVE_ASANA_GID);
+    const parsed = parseCsv(text);
+    const rows = parsed.rows.map((r) => r.map((c) => String(c == null ? '' : c).trim()));
+    const stamp = rows.length + ':' + (rows[0] ? rows[0].join('|') : '') + ':' + (rows[rows.length - 1] ? rows[rows.length - 1].join('|') : '');
+    if (stamp === S.asaLiveStamp) return false;
+    S.asaLiveStamp = stamp;
+    S.asana = { cols: parsed.cols, rows, source: 'live' };
+    return true;
+  } catch (e) { console.warn('Live asana refresh failed', e); return false; }
 }
 
 async function refreshLiveAll() {
-  const [a, b] = await Promise.all([refreshLiveData(), refreshRedemptionLive()]);
-  return a || b;
+  const [a, b, c] = await Promise.all([refreshLiveData(), refreshFinancialLive(), refreshAsanaLive()]);
+  return a || b || c;
 }
 
 /* ------------------------------ FILTER PIPELINE ------------------------------ */
@@ -987,7 +1023,7 @@ function renderHeader() {
 }
 
 function tabsForRole() {
-  if (S.session.role === 'admin') return ['Overview','Quality Board','WhatsApp MOM','Inbound SLA','Redemption Tracker','Ticket Explorer'];
+  if (S.session.role === 'admin') return ['Overview','WhatsApp MOM','Inbound SLA','Quality Board','Financial Actions','Asana Tracker','Ticket Explorer'];
   if (S.session.role === 'user') return ['Overview','Ticket Explorer'];
   return null;
 }
@@ -999,7 +1035,7 @@ function renderTabs() {
   const tabDefs = tabs.map((t, i) => {
     const btn = document.createElement('button');
     btn.className = 'tab' + (i === S.activeTab ? ' active' : '');
-    btn.textContent = `${TAB_EMOJI[t] || ''} ${t}`;
+    btn.innerHTML = `<span style="display:inline-flex;align-items:center;gap:5px;">${TAB_EMOJI[t] || ''} ${t}</span>`;
     btn.addEventListener('click', () => { S.activeTab = i; renderAll(); });
     bar.appendChild(btn);
     return { name: t, idx: i };
@@ -1047,6 +1083,38 @@ function applyClickFilter(col, val) {
   S.clickFilter = { col, val };
   renderAll();
   try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo(0, 0); }
+}
+
+function computeQueueSla() {
+  const waRows = S.ffBase ? S.ffBase.filter((r) => get(r, '_team') === 'merchant' && cleanVal(get(r, 'WhatsApp SLA Status')) !== '') : [];
+  const waOt = waRows.filter((r) => /On-Time|On Time/i.test(get(r, 'WhatsApp SLA Status'))).length;
+  const waPct = waRows.length ? waOt / waRows.length * 100 : 0;
+  let inbPct = 0;
+  if (S.sla && S.sla.cols && S.sla.rows) {
+    const pca = S.sla.cols.find((c) => /pca/i.test(c));
+    if (pca) {
+      const pi = S.sla.cols.indexOf(pca);
+      const vals = S.sla.rows.map((r) => parseNum(r[pi])).filter((v) => v > 0);
+      inbPct = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+    }
+  }
+  return { wa: waPct, inb: inbPct };
+}
+
+function queueSlaCard() {
+  const q = computeQueueSla();
+  const mk = (label, val) => {
+    const achieved = val >= 95;
+    const col = achieved ? GREEN : RED;
+    const arrow = achieved ? '▲' : '▼';
+    return `<div class="sc-queue-row"><span class="sc-queue-lbl">${label}</span><span class="sc-queue-val" style="color:${col}">${val.toFixed(1)}% <span class="sc-queue-arrow">${arrow}</span></span></div>`;
+  };
+  return `<div class="sc-card" style="--top-color:#00c06a">
+    <div class="sc-label">⏱️ Queue SLA</div>
+    ${mk('WhatsApp SLA', q.wa)}
+    <div class="sc-queue-sep"></div>
+    ${mk('Inbound SLA', q.inb)}
+  </div>`;
 }
 
 function buildOverviewCharts(ffDrill, clientMode, isVf) {
@@ -1231,14 +1299,10 @@ function renderTeamOverview(dataRows, opts) {
       + cardHtml('🚨 Urgent Alert', fmt(urgent), RED, [], true);
   } else {
     scRow.className = 'sc-row';
-    let redVal = 'N/A';
-    if (S.redemption && S.redemption.kpi) {
-      redVal = parseNum(S.redemption.kpi.value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-    }
     scRow.innerHTML = cardHtml('📋 Total Tickets', fmt(dataLen), NAVY, analysis(dataLen, baseLen), false)
       + cardHtml('📞 Inbound Calls', fmt(inboundAll.length), BLUE, analysis(inboundAll.length, inboundBase.length), false)
       + cardHtml('💬 WhatsApp', fmt(waAll.length), LIGHT, analysis(waAll.length, waBase.length), false)
-      + cardHtml('💰 Total Redemption Value', redVal, '#00c06a', [], false);
+      + queueSlaCard();
   }
   frag.appendChild(scRow);
 
@@ -1728,33 +1792,190 @@ function renderSla() {
   content.appendChild(tblWrap);
 }
 
-/* ============================== REDEMPTION ============================== */
-function renderRedemption() {
+/* ============================== FINANCIAL ACTIONS ============================== */
+function renderFinancial() {
   const content = $('#content');
-  content.innerHTML = `<div class="page-title">💰 Redemption Tracker</div>`;
-  const red = S.redemption;
-  if (!red || !red.kpi) {
-    content.insertAdjacentHTML('beforeend', '<div class="empty-msg">No Redemption data available</div>');
+  content.innerHTML = `<div class="page-title">💰 Financial Actions</div>`;
+  const fin = S.financial;
+  if (!fin || !fin.cards || !fin.cards.length) {
+    content.insertAdjacentHTML('beforeend', '<div class="empty-msg">No Financial data available</div>');
     return;
   }
-  const totalTxn = fmt(parseNum(red.kpi.txn));
-  const topAgent = red.kpi.agent ? cleanVal(red.kpi.agent) : 'N/A';
-  const totalVal = parseNum(red.kpi.value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  const statusColor = (s) => (/valid/i.test(s) ? '#00873d' : (/fail|invalid|reject/i.test(s) ? '#FF4B4B' : '#F59E0B'));
 
   const mgrid = document.createElement('div');
   mgrid.className = 'mgrid3';
-  mgrid.innerHTML =
-    `<div class="mcard" style="--c:${NAVY};"><div class="ml">📋 Total Transactions</div><div class="mv">${totalTxn}</div></div>
-     <div class="mcard" style="--c:${BLUE};"><div class="ml">🏆 Top Agent</div><div class="mv sm">${esc(topAgent)}</div></div>
-     <div class="mcard" style="--c:${LIGHT};"><div class="ml">💰 Total Redemption Amount</div><div class="mv">${totalVal}</div></div>`;
+  mgrid.innerHTML = fin.cards.map((c) => {
+    const sc = statusColor(c.status);
+    return `<div class="mcard" style="--c:${sc};">
+      <div class="ml">📊 ${esc(c.name)}</div>
+      <div class="mv">${fmt(parseNum(c.total))}</div>
+      <div class="mst" style="color:${sc}">● ${esc(c.status)}</div>
+    </div>`;
+  }).join('');
   content.appendChild(mgrid);
 
-  if (red.rows.length) {
+  if (fin.rows && fin.rows.length) {
     const tblWrap = document.createElement('div');
-    tblWrap.className = 'table-wrap';
-    tblWrap.innerHTML = renderTable(red.cols, red.rows);
+    tblWrap.className = 'table-wrap thin';
+    tblWrap.innerHTML = renderTable(fin.cols || ['Sheet Name', 'Total', 'Status'], fin.rows);
     content.appendChild(tblWrap);
   }
+}
+
+/* ============================== ASANA TRACKER ============================== */
+function renderAsana() {
+  const content = $('#content');
+  content.innerHTML = `<div class="page-title">🔺 Asana Tracker</div>`;
+  const as = S.asana;
+  if (!as || !as.rows || !as.rows.length || !as.cols) {
+    content.insertAdjacentHTML('beforeend', '<div class="empty-msg">No Asana data available</div>');
+    return;
+  }
+  const tsI = as.cols.indexOf('Task Status');
+  const taskI = as.cols.indexOf('Task Name');
+  const asI = as.cols.indexOf('Assignee');
+  if (tsI < 0 || taskI < 0) {
+    content.insertAdjacentHTML('beforeend', '<div class="empty-msg">Asana sheet format not recognized</div>');
+    return;
+  }
+
+  const norm = (v) => String(v == null ? '' : v).trim().toLowerCase();
+  const statusOf = (v) => {
+    const s = norm(v);
+    if (s === 'completed') return 'Completed';
+    if (s.indexOf('over') >= 0) return 'Over due';
+    if (s.indexOf('within') >= 0) return 'Within SLA';
+    if (s === 'open') return 'Open';
+    return s || '—';
+  };
+  const rows = as.rows.map((r) => {
+    const name = String(r[taskI] == null ? '' : r[taskI]).trim();
+    return { name, status: statusOf(r[tsI]), assignee: asI >= 0 ? String(r[asI] == null ? '' : r[asI]).trim() : '', r };
+  }).filter((x) => x.name);
+
+  const count = (fn) => rows.filter(fn).length;
+  const total = rows.length;
+  const completed = count((x) => x.status === 'Completed');
+  const withinSla = count((x) => x.status === 'Within SLA');
+  const overdue = count((x) => x.status === 'Over due');
+
+  // red alert — notice when overdue increases since last check
+  let lastOverdue = null;
+  try { lastOverdue = parseInt(localStorage.getItem('ds_overdue_last') || '', 10); } catch (e) {}
+  const increased = lastOverdue != null && !isNaN(lastOverdue) && overdue > lastOverdue;
+  try { localStorage.setItem('ds_overdue_last', String(overdue)); } catch (e) {}
+
+  if (overdue > 0) {
+    const alert = document.createElement('div');
+    alert.className = 'asana-alert' + (increased ? ' inc' : '');
+    alert.innerHTML = `<span class="asana-alert-ico">🚨</span>
+      <div><b>${fmt(overdue)} Overdue Task${overdue === 1 ? '' : 's'}</b>
+      ${increased ? `<span class="asana-alert-delta">🔺 +${fmt(overdue - lastOverdue)} vs last check</span>` : '<span>requires immediate action</span>'}</div>`;
+    content.appendChild(alert);
+  }
+
+  const mgrid = document.createElement('div');
+  mgrid.className = 'mgrid4';
+  mgrid.innerHTML =
+    `<div class="mcard" style="--c:${NAVY};"><div class="ml">📋 Total Tasks</div><div class="mv">${fmt(total)}</div></div>
+     <div class="mcard" style="--c:${GREEN};"><div class="ml">✅ Completed</div><div class="mv">${fmt(completed)}</div></div>
+     <div class="mcard" style="--c:${LIGHT};"><div class="ml">⏱️ Within SLA</div><div class="mv">${fmt(withinSla)}</div></div>
+     <div class="mcard" style="--c:${RED};"><div class="ml">⚠️ Over due</div><div class="mv" style="color:${RED};">${fmt(overdue)}</div></div>`;
+  content.appendChild(mgrid);
+
+  // filters
+  const statuses = ['All', 'Over due', 'Completed', 'Within SLA', 'Open'];
+  const assignees = ['All', ...Array.from(new Set(rows.map((x) => x.assignee))).filter(Boolean).sort()];
+  const filterRow = document.createElement('div');
+  filterRow.className = 'drill-row';
+  filterRow.innerHTML = `<label>🎚️ Filter by Status:</label>
+    <select class="select-sel" id="asana-status" style="background:${NAVY};color:#fff;border-radius:8px;padding:7px 10px;font-size:12px;max-width:180px;">
+      ${statuses.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join('')}
+    </select>
+    <label>🧑‍💼 Assignee:</label>
+    <select class="select-sel" id="asana-assignee" style="background:${NAVY};color:#fff;border-radius:8px;padding:7px 10px;font-size:12px;max-width:220px;">
+      ${assignees.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('')}
+    </select>
+    <input class="search-input" id="asana-search" placeholder="Search task / ticket…" style="flex:1;min-width:200px;">`;
+  content.appendChild(filterRow);
+
+  const stTitle = document.createElement('div');
+  stTitle.className = 'st-section-title';
+  stTitle.textContent = '📊 Issue Analysis (by Task Name)';
+  content.appendChild(stTitle);
+
+  const analysisWrap = document.createElement('div');
+  analysisWrap.className = 'table-wrap thin';
+  content.appendChild(analysisWrap);
+
+  const tasksTitle = document.createElement('div');
+  tasksTitle.className = 'st-section-title';
+  tasksTitle.textContent = '📋 All Tasks';
+  content.appendChild(tasksTitle);
+
+  const tasksWrap = document.createElement('div');
+  tasksWrap.className = 'table-wrap';
+  content.appendChild(tasksWrap);
+
+  const buildAnalysis = (filtered) => {
+    const groups = new Map();
+    for (const x of filtered) {
+      if (!groups.has(x.name)) groups.set(x.name, { Completed: 0, 'Over due': 0, 'Within SLA': 0, Open: 0 });
+      groups.get(x.name)[x.status] = (groups.get(x.name)[x.status] || 0) + 1;
+    }
+    return Array.from(groups.entries()).map(([name, st]) => ({ name, ...st }))
+      .sort((a, b) => (b['Completed'] + b['Over due'] + b['Within SLA'] + b.Open) - (a['Completed'] + a['Over due'] + a['Within SLA'] + a.Open));
+  };
+
+  const draw = () => {
+    const status = $('#asana-status').value;
+    const assignee = $('#asana-assignee').value;
+    const q = cleanVal($('#asana-search').value).toLowerCase();
+    let filtered = rows;
+    if (status !== 'All') filtered = filtered.filter((x) => x.status === status);
+    if (assignee !== 'All') filtered = filtered.filter((x) => x.assignee === assignee);
+    if (q) filtered = filtered.filter((x) => x.name.toLowerCase().includes(q) || String(x.r[as.cols.indexOf('Ticket ID')] == null ? '' : x.r[as.cols.indexOf('Ticket ID')]).toLowerCase().includes(q));
+
+    const ag = buildAnalysis(filtered);
+    analysisWrap.innerHTML = ag.length ? renderTable(
+      ['🏷️ Issue Type', '📋 Tasks', '✅ Completed', '⚠️ Over due', '⏱️ Within SLA', '📂 Open', '📊 % of All'],
+      ag.map((g) => {
+        const gTotal = g['Completed'] + g['Over due'] + g['Within SLA'] + g.Open;
+        return [g.name, fmt(gTotal), fmt(g['Completed']), fmt(g['Over due']), fmt(g['Within SLA']), fmt(g.Open),
+          (filtered.length ? (gTotal / filtered.length * 100) : 0).toFixed(1) + '%'];
+      }), []) : '<div class="empty-msg">No tasks match the filters</div>';
+
+    const tIdI = as.cols.indexOf('Ticket ID');
+    const dueI = as.cols.indexOf('Due Date');
+    const wdI = as.cols.indexOf('Working Days Elapsed');
+    const linkI = as.cols.indexOf('Asana Link');
+    const assigneeI = as.cols.indexOf('Assignee');
+    const createdI = as.cols.indexOf('Created At');
+    const headers = ['🏷️ Task Name', '🎫 Ticket ID', '🧑‍💼 Assignee', '📅 Created', '⏰ Due Date', '🔢 Working Days', '📌 Task Status'];
+    const cells = filtered.map((x) => [
+      x.name,
+      tIdI >= 0 ? x.r[tIdI] : '',
+      assigneeI >= 0 ? x.r[assigneeI] : '',
+      createdI >= 0 ? x.r[createdI] : '',
+      dueI >= 0 ? x.r[dueI] : '',
+      wdI >= 0 ? x.r[wdI] : '',
+      `<span class="asana-st asana-st-${x.status.toLowerCase().replace(/[^a-z]/g, '')}">${esc(x.status)}</span>`,
+    ]);
+    const rawIdx = [];
+    if (linkI >= 0) {
+      headers.push('🔗 Asana');
+      rawIdx.push(headers.length - 1);
+      for (let i = 0; i < cells.length; i++) {
+        cells[i].push(`<a href="${esc(filtered[i].r[linkI])}" target="_blank" rel="noopener">Open ↗</a>`);
+      }
+    }
+    tasksWrap.innerHTML = cells.length ? renderTable(headers, cells, rawIdx) : '<div class="empty-msg">No tasks match the filters</div>';
+  };
+  draw();
+  $('#asana-status').addEventListener('change', draw);
+  $('#asana-assignee').addEventListener('change', draw);
+  $('#asana-search').addEventListener('input', draw);
 }
 
 /* ============================== TICKET EXPLORER ============================== */
@@ -2027,7 +2248,8 @@ function renderAll() {
     else if (name === 'Quality Board') renderQuality();
     else if (name === 'WhatsApp MOM') renderWhatsApp();
     else if (name === 'Inbound SLA') renderSla();
-    else if (name === 'Redemption Tracker') renderRedemption();
+    else if (name === 'Financial Actions') renderFinancial();
+    else if (name === 'Asana Tracker') renderAsana();
     else if (name === 'Ticket Explorer') renderExplorer();
   }
   resizeChartsSoon();
