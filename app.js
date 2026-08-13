@@ -4,7 +4,7 @@
    no matter how large the dataset is. */
 
 /* ============================== CONFIG ============================== */
-const NAVY = '#002147', BLUE = '#0055A4', LIGHT = '#00AEEF', RED = '#FF4B4B', GREEN = '#00873d';
+const NAVY = '#002147', BLUE = '#0055A4', LIGHT = '#00AEEF', RED = '#FF4B4B', GREEN = '#00873d', PURPLE = '#7C3AED';
 const PIE_COLORS = ['#0055A4','#00AEEF','#16A34A','#F59E0B','#7C3AED','#EF4444','#0D9488','#DB2777','#65A30D','#0E7490'];
 const TYPE_SHARE_COLORS = {
   'Technical issue': '#0066CC',
@@ -36,7 +36,7 @@ const S = {
   meta: null,
   tickets: null,               // {cols, rows}
   colIdx: {},
-  agent: null, sla: null, redemption: null, financial: null, asana: null, asanaPrevOverdue: null,
+  agent: null, sla: null, redemption: null, financial: null, asana: null, asanaStatuses: null, asanaNewlyCompleted: null,
   filters: { dateMode:null, customStart:null, customEnd:null,
              merchant:[], project:[], branch:[], district:[], type:[], subtype:[], microtype:[], action:[], status:[] },
   fSearch: {},
@@ -414,9 +414,37 @@ async function refreshAsanaLive() {
     const text = await fetchSheetCsv(LIVE_ASANA_GID);
     const parsed = parseCsv(text);
     const rows = parsed.rows.map((r) => r.map((c) => String(c == null ? '' : c).trim()));
-    const stamp = rows.length + ':' + (rows[0] ? rows[0].join('|') : '') + ':' + (rows[rows.length - 1] ? rows[rows.length - 1].join('|') : '');
+    const gidI = parsed.cols.indexOf('Task GID');
+    const tsI = parsed.cols.indexOf('Task Status');
+    const tidI = parsed.cols.indexOf('Ticket ID');
+    const nameI = parsed.cols.indexOf('Task Name');
+    const statuses = {};
+    if (gidI >= 0 && tsI >= 0) {
+      for (const r of rows) {
+        const key = String(r[gidI] == null ? '' : r[gidI]).trim() + '|' + String(r[tidI] == null ? '' : r[tidI]).trim();
+        const st = String(r[tsI] == null ? '' : r[tsI]).trim().toLowerCase();
+        if (key !== '|') statuses[key] = st;
+      }
+    }
+    const stamp = rows.length + ':' + JSON.stringify(statuses);
     if (stamp === S.asaLiveStamp) return false;
+    const newlyCompleted = [];
+    if (S.asanaStatuses) {
+      for (const key in statuses) {
+        const prev = S.asanaStatuses[key];
+        if (prev && prev !== 'completed' && statuses[key] === 'completed') {
+          let nm = key;
+          if (nameI >= 0) {
+            const hit = rows.find((r) => String(r[gidI] == null ? '' : r[gidI]).trim() + '|' + String(r[tidI] == null ? '' : r[tidI]).trim() === key);
+            if (hit) nm = String(hit[nameI] == null ? '' : hit[nameI]).trim() || key;
+          }
+          newlyCompleted.push({ key, name: nm });
+        }
+      }
+    }
     S.asaLiveStamp = stamp;
+    S.asanaStatuses = statuses;
+    S.asanaNewlyCompleted = newlyCompleted.length ? newlyCompleted : null;
     S.asana = { cols: parsed.cols, rows, source: 'live' };
     return true;
   } catch (e) { console.warn('Live asana refresh failed', e); return false; }
@@ -858,10 +886,8 @@ function bindMselBehaviors(sb) {
       S.fSearch[name] = inp.value;
       const box = inp.closest('.msel');
       const selected = S.filters[name];
-      box.querySelector('.msel-body').innerHTML =
-        `<input class="msel-search" data-s="${name}" placeholder="Search…" value="${esc(inp.value)}">
-         ${mselOptionsHtml(name, box.dataset.mselCol, selected, inp.value)}`;
-      bindMselBehaviors(box);
+      const opts = box.querySelector('.msel-opts');
+      opts.innerHTML = mselOptionsHtml(name, box.dataset.mselCol, selected, inp.value);
       bindCheckboxes();
     });
   });
@@ -902,7 +928,7 @@ function renderSidebar() {
         </div>
         <div class="msel-body">
           <input class="msel-search" data-s="${name}" placeholder="Search…" value="${esc(search)}">
-          ${mselOptionsHtml(name, colName, selected, search)}
+          <div class="msel-opts">${mselOptionsHtml(name, colName, selected, search)}</div>
         </div>
       </div>`;
   };
@@ -1860,11 +1886,34 @@ function renderAsana() {
   const withinSla = count((x) => x.status === 'Within SLA');
   const overdue = count((x) => x.status === 'Over due');
 
+  // follow-up count — merchant tickets with Type = Follow-Up (live/bundled)
+  let followUp = 0;
+  if (S.tickets && S.tickets.cols) {
+    const tyI = S.tickets.cols.indexOf('Type');
+    const teamI = S.tickets.cols.indexOf('_team');
+    if (tyI >= 0) {
+      for (const r of S.tickets.rows) {
+        if (String(r[tyI] == null ? '' : r[tyI]).trim().toLowerCase() === 'follow-up' && (teamI < 0 || String(r[teamI] == null ? '' : r[teamI]).trim().toLowerCase() === 'merchant')) followUp++;
+      }
+    }
+  }
+
   // red alert — notice when overdue increases since last check
   let lastOverdue = null;
   try { lastOverdue = parseInt(localStorage.getItem('ds_overdue_last') || '', 10); } catch (e) {}
   const increased = lastOverdue != null && !isNaN(lastOverdue) && overdue > lastOverdue;
   try { localStorage.setItem('ds_overdue_last', String(overdue)); } catch (e) {}
+
+  // green alert — task closed / moved open→completed since last refresh
+  const newly = S.asanaNewlyCompleted && S.asanaNewlyCompleted.length ? S.asanaNewlyCompleted : null;
+  if (newly && newly.length) {
+    const alert = document.createElement('div');
+    alert.className = 'asana-alert ok';
+    alert.innerHTML = `<span class="asana-alert-ico">✅</span>
+      <div><b>${newly.length === 1 ? 'Task' : fmt(newly.length) + ' Tasks'} completed since last check</b>
+      <span class="asana-alert-list">${newly.slice(0, 3).map((t) => esc(t.name)).join(', ')}${newly.length > 3 ? '…' : ''}</span></div>`;
+    content.appendChild(alert);
+  }
 
   if (overdue > 0) {
     const alert = document.createElement('div');
@@ -1876,12 +1925,13 @@ function renderAsana() {
   }
 
   const mgrid = document.createElement('div');
-  mgrid.className = 'mgrid4';
+  mgrid.className = 'mgrid5';
   mgrid.innerHTML =
     `<div class="mcard" style="--c:${NAVY};"><div class="ml">📋 Total Tasks</div><div class="mv">${fmt(total)}</div></div>
      <div class="mcard" style="--c:${GREEN};"><div class="ml">✅ Completed</div><div class="mv">${fmt(completed)}</div></div>
      <div class="mcard" style="--c:${LIGHT};"><div class="ml">⏱️ Within SLA</div><div class="mv">${fmt(withinSla)}</div></div>
-     <div class="mcard" style="--c:${RED};"><div class="ml">⚠️ Over due</div><div class="mv" style="color:${RED};">${fmt(overdue)}</div></div>`;
+     <div class="mcard" style="--c:${RED};"><div class="ml">⚠️ Over due</div><div class="mv" style="color:${RED};">${fmt(overdue)}</div></div>
+     <div class="mcard" style="--c:${PURPLE};"><div class="ml">📞 Follow-Up</div><div class="mv" style="color:${PURPLE};">${fmt(followUp)}</div></div>`;
   content.appendChild(mgrid);
 
   // filters
