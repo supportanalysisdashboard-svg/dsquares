@@ -1,1 +1,1 @@
-{"kpi":{"txn":"N/A","agent":"#REF!","value":"N/A"},"cols":["Agent Name","Transaction Count","Total Redemption Value"],"rows":[["#REF!","",""]],"source":"pipeline"}
+{"kpi":{"txn":"280","agent":"Ahmed","value":"547,678.56"},"cols":["Agent Name","Transaction Count","Total Redemption Value"],"rows":[["Ahmed","52","172,920.69"],["Hussien","69","125,609.69"],["Karim","52","98,161.78"],["Amira","78","92,492.40"],["Menna","29","58,494.00"]],"source":"pipeline"}
