@@ -281,6 +281,69 @@ function liveStamp(tickets) {
   return String(tickets.rows.length) + ':' + h;
 }
 
+/* ---- Open → Closed conversion tracking (per team, per day) ----
+   Every live refresh diffs the new Ticket_Status against the previous refresh:
+   a ticket that was Open (or anything non-closed) and now reads Closed is one
+   conversion. Counts accumulate in localStorage so "per day" survives reloads.
+   Only real transitions are counted — never the total stock of closed tickets. */
+const CONV_DAYS_KEY = 'ds_conv_days';
+const CONV_IDS_KEY = 'ds_conv_ids';
+const CONV_ID_CAP = 20000;
+
+function loadConv(key, fallback) {
+  try { const v = JSON.parse(localStorage.getItem(key)); return v && typeof v === 'object' ? v : fallback; } catch (e) { return fallback; }
+}
+function saveConv(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} }
+
+function trackTicketConversions(tickets) {
+  if (!S.tickets || !S.tickets.cols || !tickets.cols) return;
+  const pId = S.tickets.cols.indexOf('Ticket ID'), pSt = S.tickets.cols.indexOf('Ticket_Status'), pTeam = S.tickets.cols.indexOf('_team');
+  const nId = tickets.cols.indexOf('Ticket ID'), nSt = tickets.cols.indexOf('Ticket_Status'), nTeam = tickets.cols.indexOf('_team');
+  if (pSt < 0 || nSt < 0 || nId < 0) return;
+
+  const prevByTeam = { merchant: new Map(), client: new Map() };
+  for (const r of S.tickets.rows) {
+    const id = String(r[pId] == null ? '' : r[pId]).trim();
+    if (!id) continue;
+    const t = pTeam >= 0 ? String(r[pTeam] == null ? '' : r[pTeam]).trim() : 'merchant';
+    (prevByTeam[t] || prevByTeam.merchant).set(id, String(r[pSt] == null ? '' : r[pSt]).trim().toLowerCase());
+  }
+
+  const days = loadConv(CONV_DAYS_KEY, { merchant: {}, client: {} });
+  const seenStore = loadConv(CONV_IDS_KEY, { merchant: [], client: [] });
+  const today = iso(new Date());
+  let changed = false;
+
+  for (const team of ['merchant', 'client']) {
+    const seen = new Set(seenStore[team] || []);
+    for (const r of tickets.rows) {
+      const t = nTeam >= 0 ? String(r[nTeam] == null ? '' : r[nTeam]).trim() : 'merchant';
+      if (t !== team) continue;
+      const id = String(r[nId] == null ? '' : r[nId]).trim();
+      if (!id || seen.has(id)) continue;
+      const st = String(r[nSt] == null ? '' : r[nSt]).trim().toLowerCase();
+      const was = prevByTeam[team].get(id);
+      // true transition: existed before as non-closed, now closed
+      if (was && was !== 'closed' && st === 'closed') {
+        days[team] = days[team] || {};
+        days[team][today] = (days[team][today] || 0) + 1;
+        seen.add(id);
+        changed = true;
+      }
+    }
+    seenStore[team] = Array.from(seen).slice(-CONV_ID_CAP);
+  }
+  if (!changed) return;
+  // keep only the last 14 days
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 14);
+  const cutStr = iso(cutoff);
+  for (const team of ['merchant', 'client']) {
+    for (const d of Object.keys(days[team] || {})) if (d < cutStr) delete days[team][d];
+  }
+  saveConv(CONV_DAYS_KEY, days);
+  saveConv(CONV_IDS_KEY, seenStore);
+}
+
 function buildLiveMeta(tickets) {
   const cols = tickets.cols;
   const rows = tickets.rows;
@@ -311,6 +374,7 @@ async function refreshLiveData() {
     const tickets = mergeLiveTickets(pm, pc);
     const stamp = liveStamp(tickets);
     if (stamp === S.liveStamp) return false;
+    trackTicketConversions(tickets);
     S.liveStamp = stamp;
     S.liveActive = true;
     S.tickets = { cols: tickets.cols, rows: tickets.rows };
@@ -1240,39 +1304,6 @@ function renderVolumeTrend(rows, teamKey) {
   return { wrap, dates: peak.map((d) => d.name) };
 }
 
-/* Tickets converted Open → Closed = rows whose Ticket_Status is 'Closed'
-   (status itself is derived from a non-empty Closed time, so this is exactly
-   the set of tickets that moved from open to closed). Per-day rate is read
-   from the same rows the Live Ticket Status chart is built on. */
-function closedDayOf(v) {
-  const s = String(v == null ? '' : v).trim();
-  if (!s) return '';
-  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) return m[1] + '-' + pad2(m[2]) + '-' + pad2(m[3]);
-  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if (m) return m[3] + '-' + pad2(m[1]) + '-' + pad2(m[2]);
-  const dt = new Date(s);
-  return isNaN(dt.getTime()) ? '' : iso(dt);
-}
-
-function openToClosedStats(rows) {
-  const stI = col('Ticket_Status');
-  const closedRows = stI == null ? [] : rows.filter((r) => String(r[stI] == null ? '' : r[stI]) === 'Closed');
-  const total = closedRows.length;
-  if (!total) return { total: 0, days: 0, perDay: 0 };
-  const ctIdx = col('Closed time');
-  const days = new Set();
-  if (ctIdx != null) {
-    for (const r of closedRows) { const d = closedDayOf(r[ctIdx]); if (d) days.add(d); }
-  }
-  if (!days.size) {
-    const dIdx = col('D_Obj');
-    if (dIdx != null) for (const r of closedRows) { const d = String(r[dIdx] == null ? '' : r[dIdx]).trim(); if (d) days.add(d); }
-  }
-  const nDays = days.size || 1;
-  return { total, days: days.size, perDay: total / nDays };
-}
-
 function renderStatusPie(ffDrill, onClick) {
   const sc = countBy(ffDrill, 'Ticket_Status', { clean: false });
   if (!sc.length) return null;
@@ -1409,21 +1440,28 @@ function renderTeamOverview(dataRows, opts) {
           <span class="ov-alert-list">${S.asanaNewlyCompleted.slice(0, 3).map((t) => esc(t.name)).join(', ')}${newlyN > 3 ? '…' : ''}</span></div>`;
         statusWrap.appendChild(al);
       }
-      const oc = openToClosedStats(ffDrill);
-      if (oc.total > 0) {
+      // green alerts — real Open → Closed transitions only (never total closed stock)
+      const convAll = loadConv(CONV_DAYS_KEY, { merchant: {}, client: {} });
+      const convDaysMap = convAll[teamKey] || {};
+      const todayConv = convDaysMap[iso(new Date())] || 0;
+      let convSum = 0;
+      const convDayCount = Object.keys(convDaysMap).length;
+      for (const d in convDaysMap) convSum += convDaysMap[d];
+      const perDay = convDayCount ? convSum / Math.min(convDayCount, 7) : 0;
+      if (todayConv > 0 || perDay > 0) {
         const a1 = document.createElement('div');
         a1.className = 'ov-alert ok';
         a1.style.width = 'min(560px,100%)';
         a1.innerHTML = `<span class="ov-alert-ico">✅</span>
-          <div><b>${fmt(oc.total)} ticket${oc.total === 1 ? '' : 's'} converted from Open → Closed</b>
-          <span class="ov-alert-list">${ffDrill.length ? (oc.total / ffDrill.length * 100).toFixed(1) + '% of the ' + fmt(ffDrill.length) + ' tickets in this view' : ''}</span></div>`;
+          <div><b>${fmt(todayConv)} ticket${todayConv === 1 ? '' : 's'} converted from Open → Closed</b>
+          <span class="ov-alert-list">live conversions detected on the Live Ticket Status chart today</span></div>`;
         statusWrap.appendChild(a1);
         const a2 = document.createElement('div');
         a2.className = 'ov-alert ok';
         a2.style.width = 'min(560px,100%)';
         a2.innerHTML = `<span class="ov-alert-ico">📈</span>
-          <div><b>~${oc.perDay < 10 ? oc.perDay.toFixed(1) : fmt(Math.round(oc.perDay))} tickets/day</b>
-          <span class="ov-alert-list">converted from Open → Closed per day across ${fmt(oc.days)} active da${oc.days === 1 ? 'y' : 'ys'}</span></div>`;
+          <div><b>~${perDay < 10 ? perDay.toFixed(1) : fmt(Math.round(perDay))} tickets/day</b>
+          <span class="ov-alert-list">converted from Open → Closed per day</span></div>`;
         statusWrap.appendChild(a2);
       }
       statusCard.style.width = 'min(560px,100%)';
