@@ -39,9 +39,10 @@ const S = {
   agent: null, sla: null, redemption: null, financial: null, asana: null, asanaStatuses: null, asanaNewlyCompleted: null,
   filters: { dateMode:null, customStart:null, customEnd:null,
              merchant:[], project:[], branch:[], district:[], type:[], subtype:[], microtype:[], action:[], status:[] },
-  fSearch: {},
-  clickFilter: { col:null, val:null },
-  activeTab: 0,
+   fSearch: {},
+   clickFilter: { col:null, val:null },
+   explorerScope: null,         // { label, ids?|type? } — scopes Ticket Explorer from Asana Tracker clicks
+   activeTab: 0,
   ovTeam: 0,                   // 0 = Merchant Support, 1 = Client Support
   drill: { merchant:null, client:null },
   slideshow: false,
@@ -1239,6 +1240,39 @@ function renderVolumeTrend(rows, teamKey) {
   return { wrap, dates: peak.map((d) => d.name) };
 }
 
+/* Tickets converted Open → Closed = rows whose Ticket_Status is 'Closed'
+   (status itself is derived from a non-empty Closed time, so this is exactly
+   the set of tickets that moved from open to closed). Per-day rate is read
+   from the same rows the Live Ticket Status chart is built on. */
+function closedDayOf(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return '';
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return m[1] + '-' + pad2(m[2]) + '-' + pad2(m[3]);
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return m[3] + '-' + pad2(m[1]) + '-' + pad2(m[2]);
+  const dt = new Date(s);
+  return isNaN(dt.getTime()) ? '' : iso(dt);
+}
+
+function openToClosedStats(rows) {
+  const stI = col('Ticket_Status');
+  const closedRows = stI == null ? [] : rows.filter((r) => String(r[stI] == null ? '' : r[stI]) === 'Closed');
+  const total = closedRows.length;
+  if (!total) return { total: 0, days: 0, perDay: 0 };
+  const ctIdx = col('Closed time');
+  const days = new Set();
+  if (ctIdx != null) {
+    for (const r of closedRows) { const d = closedDayOf(r[ctIdx]); if (d) days.add(d); }
+  }
+  if (!days.size) {
+    const dIdx = col('D_Obj');
+    if (dIdx != null) for (const r of closedRows) { const d = String(r[dIdx] == null ? '' : r[dIdx]).trim(); if (d) days.add(d); }
+  }
+  const nDays = days.size || 1;
+  return { total, days: days.size, perDay: total / nDays };
+}
+
 function renderStatusPie(ffDrill, onClick) {
   const sc = countBy(ffDrill, 'Ticket_Status', { clean: false });
   if (!sc.length) return null;
@@ -1374,6 +1408,23 @@ function renderTeamOverview(dataRows, opts) {
           <div><b>${fmt(newlyN)} task${newlyN === 1 ? '' : 's'} completed since last check</b>
           <span class="ov-alert-list">${S.asanaNewlyCompleted.slice(0, 3).map((t) => esc(t.name)).join(', ')}${newlyN > 3 ? '…' : ''}</span></div>`;
         statusWrap.appendChild(al);
+      }
+      const oc = openToClosedStats(ffDrill);
+      if (oc.total > 0) {
+        const a1 = document.createElement('div');
+        a1.className = 'ov-alert ok';
+        a1.style.width = 'min(560px,100%)';
+        a1.innerHTML = `<span class="ov-alert-ico">✅</span>
+          <div><b>${fmt(oc.total)} ticket${oc.total === 1 ? '' : 's'} converted from Open → Closed</b>
+          <span class="ov-alert-list">${ffDrill.length ? (oc.total / ffDrill.length * 100).toFixed(1) + '% of the ' + fmt(ffDrill.length) + ' tickets in this view' : ''}</span></div>`;
+        statusWrap.appendChild(a1);
+        const a2 = document.createElement('div');
+        a2.className = 'ov-alert ok';
+        a2.style.width = 'min(560px,100%)';
+        a2.innerHTML = `<span class="ov-alert-ico">📈</span>
+          <div><b>~${oc.perDay < 10 ? oc.perDay.toFixed(1) : fmt(Math.round(oc.perDay))} tickets/day</b>
+          <span class="ov-alert-list">converted from Open → Closed per day across ${fmt(oc.days)} active da${oc.days === 1 ? 'y' : 'ys'}</span></div>`;
+        statusWrap.appendChild(a2);
       }
       statusCard.style.width = 'min(560px,100%)';
       statusWrap.appendChild(statusCard);
@@ -1946,6 +1997,19 @@ function renderAsana() {
      <div class="mcard" style="--c:${PURPLE};"><div class="ml">📞 Follow-Up</div><div class="mv" style="color:${PURPLE};">${fmt(followUp)}</div></div>`;
   content.appendChild(mgrid);
 
+  // ⚠️ Over due / 📞 Follow-Up cards jump straight into the Ticket Explorer
+  const tidIdx = as.cols.indexOf('Ticket ID');
+  const odIds = new Set(rows.filter((x) => x.status === 'Over due')
+    .map((x) => String(tidIdx >= 0 ? x.r[tidIdx] : '').trim()).filter(Boolean));
+  const mcards = mgrid.querySelectorAll('.mcard');
+  const linkCard = (card, scope, hint) => {
+    card.classList.add('link');
+    card.title = hint;
+    card.addEventListener('click', () => { S.explorerScope = scope; goExplorer(); });
+  };
+  linkCard(mcards[3], { label: '⚠️ Overdue Tasks', ids: odIds }, 'Open these overdue tasks in Ticket Explorer');
+  linkCard(mcards[4], { label: '📞 Follow-Up Tickets', type: 'follow-up' }, 'Open Follow-Up tickets in Ticket Explorer');
+
   // filters
   const statuses = ['All', 'Over due', 'Completed', 'Within SLA', 'Open'];
   const assignees = ['All', ...Array.from(new Set(rows.map((x) => x.assignee))).filter(Boolean).sort()];
@@ -2037,6 +2101,63 @@ function renderAsana() {
   $('#asana-status').addEventListener('change', draw);
   $('#asana-assignee').addEventListener('change', draw);
   $('#asana-search').addEventListener('input', draw);
+
+  // ---- ⚠️ Overdue tasks table ----
+  const dueCol = as.cols.indexOf('Due Date');
+  const wdCol = as.cols.indexOf('Working Days Elapsed');
+  const linkCol = as.cols.indexOf('Asana Link');
+  const createdCol = as.cols.indexOf('Created At');
+  const numOf = (v) => { const n = parseFloat(String(v == null ? '' : v).replace(/[^\d.\-]/g, '')); return isNaN(n) ? -1 : n; };
+  const odRows = rows.filter((x) => x.status === 'Over due').sort((a, b) => numOf(b.r[wdCol]) - numOf(a.r[wdCol]));
+
+  const odTitle = document.createElement('div');
+  odTitle.className = 'st-section-title';
+  odTitle.textContent = `⚠️ Overdue Tasks (${fmt(odRows.length)})`;
+  content.appendChild(odTitle);
+  const odWrap = document.createElement('div');
+  odWrap.className = 'table-wrap thin';
+  content.appendChild(odWrap);
+  odWrap.innerHTML = odRows.length ? renderTable(
+    ['🏷️ Task Name', '🎫 Ticket ID', '🧑‍💼 Assignee', '📅 Created', '⏰ Due Date', '🔢 Working Days'].concat(linkCol >= 0 ? ['🔗 Asana'] : []),
+    odRows.map((x) => [
+      x.name,
+      tidIdx >= 0 ? x.r[tidIdx] : '',
+      asI >= 0 ? x.r[asI] : '',
+      createdCol >= 0 ? x.r[createdCol] : '',
+      dueCol >= 0 ? x.r[dueCol] : '',
+      wdCol >= 0 ? x.r[wdCol] : '',
+    ].concat(linkCol >= 0 ? [`<a href="${esc(x.r[linkCol])}" target="_blank" rel="noopener">Open ↗</a>`] : [])),
+    linkCol >= 0 ? [6] : []) : '<div class="empty-msg">No overdue tasks 🎉</div>';
+
+  // ---- 📞 Follow-Up tickets table (from live tickets, Type = Follow-Up) ----
+  let fuCount = 0;
+  const fuTitle = document.createElement('div');
+  fuTitle.className = 'st-section-title';
+  fuTitle.textContent = `📞 Follow-Up Tickets`;
+  content.appendChild(fuTitle);
+  const fuWrap = document.createElement('div');
+  fuWrap.className = 'table-wrap thin';
+  content.appendChild(fuWrap);
+  if (S.tickets && S.tickets.cols) {
+    const T = S.tickets;
+    const tyJ = T.cols.indexOf('Type'), teamJ = T.cols.indexOf('_team'), idJ = T.cols.indexOf('Ticket ID'),
+      crJ = T.cols.indexOf('Created time'), meJ = T.cols.indexOf('Merchant'), prJ = T.cols.indexOf('Project'),
+      agJ = T.cols.indexOf('Agent'), sttJ = T.cols.indexOf('Status');
+    const fuCells = [];
+    for (const r of T.rows) {
+      if (tyJ < 0 || String(r[tyJ] == null ? '' : r[tyJ]).trim().toLowerCase() !== 'follow-up') continue;
+      if (teamJ >= 0 && String(r[teamJ] == null ? '' : r[teamJ]).trim().toLowerCase() !== 'merchant') continue;
+      fuCount++;
+      fuCells.push([idJ >= 0 ? r[idJ] : '', meJ >= 0 ? r[meJ] : '', prJ >= 0 ? r[prJ] : '',
+        crJ >= 0 ? r[crJ] : '', agJ >= 0 ? r[agJ] : '', sttJ >= 0 ? r[sttJ] : '']);
+    }
+    fuTitle.textContent = `📞 Follow-Up Tickets (${fmt(fuCount)})`;
+    fuWrap.innerHTML = fuCells.length ? renderTable(
+      ['🎫 Ticket ID', '🏪 Merchant', '🏢 Project', '📅 Created', '🧑‍🔧 Agent', '🔄 Status'], fuCells, [])
+      : '<div class="empty-msg">No Follow-Up tickets</div>';
+  } else {
+    fuWrap.innerHTML = '<div class="empty-msg">No ticket data available</div>';
+  }
 }
 
 /* ============================== TICKET EXPLORER ============================== */
@@ -2079,6 +2200,27 @@ function renderExplorer() {
 
   let rows = team;
   if (drillDate) rows = rows.filter((r) => get(r, 'D_Obj') === drillDate);
+
+  // scoped view coming from an Asana Tracker card click
+  if (S.explorerScope) {
+    const sc = S.explorerScope;
+    if (sc.type) {
+      rows = rows.filter((r) => cleanVal(get(r, 'Type')).toLowerCase() === sc.type);
+    } else if (sc.ids) {
+      rows = rows.filter((r) => sc.ids.has(cleanVal(get(r, 'Ticket ID'))));
+    }
+    const banner = document.createElement('div');
+    banner.className = 'click-filter-banner';
+    const span = document.createElement('span');
+    span.innerHTML = `🎯 ${esc(sc.label)}: <b>${fmt(rows.length)}</b> matching ticket${rows.length === 1 ? '' : 's'} in ${S.ovTeam === 0 ? 'Merchant' : 'Client'} Support`;
+    const btn = document.createElement('button');
+    btn.className = 'clear-btn';
+    btn.textContent = '✕ Clear Scope';
+    btn.addEventListener('click', () => { S.explorerScope = null; renderAll(); });
+    banner.appendChild(span);
+    banner.appendChild(btn);
+    content.appendChild(banner);
+  }
 
   const displayCols = S.tickets.cols.filter((c) => !['D_Obj', 'Ticket_Status', '_team'].includes(c));
   const dispIdx = displayCols.map((c) => col(c));

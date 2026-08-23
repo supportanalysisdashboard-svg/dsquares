@@ -380,6 +380,9 @@ body{
   border-top:4px solid var(--c,var(--navy));transition:all .28s cubic-bezier(.18,.89,.32,1.28);
 }
 .mcard:hover{transform:translateY(-6px) scale(1.01);box-shadow:0 12px 32px rgba(0,33,71,.14);}
+.mcard.link{cursor:pointer;}
+.mcard.link:hover{transform:translateY(-6px) scale(1.02);box-shadow:0 14px 34px rgba(0,85,164,.24);border-top-color:var(--light)!important;}
+.mcard.link .ml::after{content:' → Ticket Explorer';color:var(--blue);}
 .mcard .ml{font-size:9px;font-weight:800;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;}
 .mcard .mv{font-size:26px;font-weight:900;color:var(--navy);font-family:'Sora',sans-serif;}
 .mcard .mv.sm{font-size:18px;}
