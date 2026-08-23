@@ -1429,8 +1429,11 @@ function renderTeamOverview(dataRows, opts) {
     // ---- status pie ----
     const statusCard = renderStatusPie(ffDrill, (s) => applyClickFilter('Ticket_Status', s));
     if (statusCard) {
+      // chart and its alerts side by side (stack on narrow screens)
       const statusWrap = document.createElement('div');
-      statusWrap.style.cssText = 'display:flex;justify-content:center;align-items:center;flex-direction:column;gap:12px;';
+      statusWrap.style.cssText = 'display:flex;justify-content:center;align-items:center;flex-wrap:wrap;gap:16px;width:100%;';
+      const alertsCol = document.createElement('div');
+      alertsCol.style.cssText = 'display:flex;flex-direction:column;justify-content:center;gap:12px;flex:1 1 300px;min-width:280px;max-width:400px;';
       const newlyN = S.asanaNewlyCompleted && S.asanaNewlyCompleted.length ? S.asanaNewlyCompleted.length : 0;
       if (newlyN > 0) {
         const al = document.createElement('div');
@@ -1438,7 +1441,7 @@ function renderTeamOverview(dataRows, opts) {
         al.innerHTML = `<span class="ov-alert-ico">✅</span>
           <div><b>${fmt(newlyN)} task${newlyN === 1 ? '' : 's'} completed since last check</b>
           <span class="ov-alert-list">${S.asanaNewlyCompleted.slice(0, 3).map((t) => esc(t.name)).join(', ')}${newlyN > 3 ? '…' : ''}</span></div>`;
-        statusWrap.appendChild(al);
+        alertsCol.appendChild(al);
       }
       // green alerts — real Open → Closed transitions only (never total closed stock)
       const convAll = loadConv(CONV_DAYS_KEY, { merchant: {}, client: {} });
@@ -1451,21 +1454,20 @@ function renderTeamOverview(dataRows, opts) {
       if (todayConv > 0 || perDay > 0) {
         const a1 = document.createElement('div');
         a1.className = 'ov-alert ok';
-        a1.style.width = 'min(560px,100%)';
         a1.innerHTML = `<span class="ov-alert-ico">✅</span>
           <div><b>${fmt(todayConv)} ticket${todayConv === 1 ? '' : 's'} converted from Open → Closed</b>
           <span class="ov-alert-list">live conversions detected on the Live Ticket Status chart today</span></div>`;
-        statusWrap.appendChild(a1);
+        alertsCol.appendChild(a1);
         const a2 = document.createElement('div');
         a2.className = 'ov-alert ok';
-        a2.style.width = 'min(560px,100%)';
         a2.innerHTML = `<span class="ov-alert-ico">📈</span>
           <div><b>~${perDay < 10 ? perDay.toFixed(1) : fmt(Math.round(perDay))} tickets/day</b>
           <span class="ov-alert-list">converted from Open → Closed per day</span></div>`;
-        statusWrap.appendChild(a2);
+        alertsCol.appendChild(a2);
       }
-      statusCard.style.width = 'min(560px,100%)';
+      statusCard.style.cssText += ';flex:0 1 560px;min-width:300px;width:auto;';
       statusWrap.appendChild(statusCard);
+      if (alertsCol.children.length) statusWrap.appendChild(alertsCol);
       frag.appendChild(statusWrap);
     }
   }
