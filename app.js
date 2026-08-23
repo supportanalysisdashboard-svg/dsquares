@@ -1845,14 +1845,21 @@ function renderWhatsApp() {
       <span style="color:${acol};">${achieved ? 'Achieved' : 'Below Target'}</span></p>`;
   content.appendChild(overall);
 
-  // monthly cards, sorted by date
-  const months = [];
-  for (const r of wa) { const m = monthOf(get(r, 'D_Obj')); if (!months.includes(m)) months.push(m); }
-  months.sort();
+  // monthly cards — group first, drop stray months holding a single record
+  // (e.g. one leftover row from an old year), then order chronologically
+  const monthGroups = new Map();
+  for (const r of wa) { const m = monthOf(get(r, 'D_Obj')); if (!monthGroups.has(m)) monthGroups.set(m, []); monthGroups.get(m).push(r); }
+  const months = Array.from(monthGroups.keys())
+    .filter((m) => monthGroups.get(m).length >= 2)
+    .sort((a, b) => {
+      const pa = a.split('-').map((x) => parseInt(x, 10) || 0);
+      const pb = b.split('-').map((x) => parseInt(x, 10) || 0);
+      return (pa[0] - pb[0]) || ((pa[1] || 0) - (pb[1] || 0));
+    });
   const momGrid = document.createElement('div');
   momGrid.className = 'mom-grid';
   months.forEach((m) => {
-    const md = wa.filter((r) => monthOf(get(r, 'D_Obj')) === m);
+    const md = monthGroups.get(m);
     const mOt = md.filter((r) => /On-Time|On Time/i.test(get(r, 'WhatsApp SLA Status'))).length;
     const mLt = md.filter((r) => /Late/i.test(get(r, 'WhatsApp SLA Status'))).length;
     const prc = md.length ? mOt / md.length * 100 : 0;
