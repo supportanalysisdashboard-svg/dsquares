@@ -480,7 +480,7 @@ async function refreshAsanaLive() {
     const parsed = parseCsv(text);
     const rows = parsed.rows.map((r) => r.map((c) => String(c == null ? '' : c).trim()));
     const gidI = parsed.cols.indexOf('Task GID');
-    const tsI = parsed.cols.indexOf('Task Status');
+    const tsI = parsed.cols.indexOf('Task Status') >= 0 ? parsed.cols.indexOf('Task Status') : parsed.cols.indexOf('Status');
     const tidI = parsed.cols.indexOf('Ticket ID');
     const nameI = parsed.cols.indexOf('Task Name');
     const statuses = {};
@@ -1968,7 +1968,8 @@ function renderAsana() {
     content.insertAdjacentHTML('beforeend', '<div class="empty-msg">No Asana data available</div>');
     return;
   }
-  const tsI = as.cols.indexOf('Task Status');
+  // sheet may expose the status column as 'Task Status' or just 'Status'
+  const tsI = as.cols.indexOf('Task Status') >= 0 ? as.cols.indexOf('Task Status') : as.cols.indexOf('Status');
   const taskI = as.cols.indexOf('Task Name');
   const asI = as.cols.indexOf('Assignee');
   if (tsI < 0 || taskI < 0) {
