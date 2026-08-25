@@ -99,10 +99,15 @@ async function fetchJson(url, opts) {
   else if (opts.bust) u += (u.includes('?') ? '&' : '?') + 't=' + Date.now();
   const res = await fetch(u, { cache: (opts.bust && !opts.version) ? 'no-store' : 'default' });
   if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + url);
-  if (url.endsWith('.gz')) {
+  return await decodeMaybeGz(res, url, opts);
+}
+
+async function decodeMaybeGz(res, url, opts) {
+  const o = opts || {};
+  if (/\.gz$/.test(url)) {
     const enc = res.headers.get('Content-Encoding') || '';
     if (/gzip/i.test(enc)) return await res.json();
-    if (typeof DecompressionStream !== 'undefined') {
+    if (typeof DecompressionStream !== 'undefined' && !o.rawOnly) {
       try {
         const blob = await res.blob();
         const stream = blob.stream().pipeThrough(new DecompressionStream('gzip'));
@@ -110,9 +115,72 @@ async function fetchJson(url, opts) {
         return JSON.parse(text);
       } catch (e) { console.warn('gzip decode failed for ' + url + ' — falling back to raw JSON', e); }
     }
-    return await fetchJson(url.replace(/\.gz$/, ''), opts);
+    return await fetchJson(url.replace(/\.gz$/, ''), o);
   }
   return await res.json();
+}
+
+/* ------------------------- LOCAL BIG-DATA CACHE -------------------------
+   Large JSON payloads are stored parsed in IndexedDB together with the
+   server ETag. On every later visit we send If-None-Match: GitHub Pages
+   answers 304 Not Modified (zero bytes) and data comes from disk instantly.
+   Only when the build actually changes does the real download happen again. */
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    try {
+      const rq = indexedDB.open('ds_cache', 1);
+      rq.onupgradeneeded = () => { try { rq.result.createObjectStore('kv'); } catch (e) {} };
+      rq.onsuccess = () => resolve(rq.result);
+      rq.onerror = () => reject(rq.error || new Error('idb open failed'));
+      rq.onblocked = () => reject(new Error('idb blocked'));
+    } catch (e) { reject(e); }
+  });
+}
+async function idbGet(key) {
+  try {
+    const db = await idbOpen();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction('kv', 'readonly');
+      const g = tx.objectStore('kv').get(key);
+      g.onsuccess = () => resolve(g.result || null);
+      g.onerror = () => reject(g.error);
+    });
+  } catch (e) { return null; }
+}
+async function idbSet(key, val) {
+  try {
+    const db = await idbOpen();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('kv', 'readwrite');
+      tx.objectStore('kv').put(val, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) { /* storage unavailable — normal fetching still works */ }
+}
+
+async function loadBigData(file, key, opts) {
+  const o = opts || {};
+  const u = 'data/' + file;
+  // Hard refresh (bust): full fresh download, skip all caching.
+  if (o.bust) {
+    const res = await fetch(u + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + u);
+    const data = await decodeMaybeGz(res, u, {});
+    idbSet(key, { etag: res.headers.get('ETag') || '', data }).catch(() => {});
+    return data;
+  }
+  // Normal visit: validate the local copy by ETag — 304 costs ~0 bytes.
+  const hit = await idbGet(key);
+  const headers = {};
+  if (hit && hit.etag) headers['If-None-Match'] = hit.etag;
+  const res = await fetch(u, { headers, cache: 'no-store' });
+  if (res.status === 304 && hit && hit.data) return hit.data;
+  if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + u);
+  const etag = res.headers.get('ETag') || '';
+  const data = await decodeMaybeGz(res, u, {});
+  idbSet(key, { etag, data }).catch(() => {});
+  return data;
 }
 
 async function loadData(force) {
@@ -121,14 +189,15 @@ async function loadData(force) {
   S.meta = meta;
   S.build = meta.updated_iso || String(Date.now());
   const opts = force ? { bust: true } : { version: S.build };
-  // fetch all data files in parallel — total time ≈ slowest file, not their sum
+  // fetch all data files in parallel; big ones go through the ETag-validated
+  // local cache so repeat visits cost ~0 bytes
   const [tickets, agent, sla, redemption, financial, asana] = await Promise.all([
-    fetchJson('data/tickets.json.gz', opts),
-    fetchJson('data/agent.json', opts),
+    loadBigData('tickets.json.gz', 'tickets', opts),
+    loadBigData('agent.json', 'agent', opts),
     fetchJson('data/sla.json', opts),
     fetchJson('data/redemption.json', opts),
     fetchJson('data/financial.json', opts),
-    fetchJson('data/asana.json', opts),
+    loadBigData('asana.json', 'asana', opts),
   ]);
   showLoading('Preparing dashboard…');
   S.tickets = tickets;
