@@ -367,7 +367,23 @@ body{
   background:linear-gradient(145deg,#fff,#f5f8ff)!important;border-top:5px solid var(--navy)!important;
   border-radius:16px!important;box-shadow:0 6px 24px rgba(0,33,71,.10),0 2px 8px rgba(0,33,71,.06)!important;
   padding:20px!important;border:1px solid rgba(0,33,71,.06)!important;
+  transition:transform .45s cubic-bezier(.22,.61,.36,1),box-shadow .45s ease,border-top-color .45s ease;
 }
+/* smooth staggered entrance for the WhatsApp MOM scorecards */
+.overall-card{animation:waFadeIn .7s cubic-bezier(.22,.61,.36,1) both;}
+.mom-grid .wa-card{animation:waRise .85s cubic-bezier(.22,.61,.36,1) both;}
+.mom-grid .wa-card:nth-child(1){animation-delay:.05s}
+.mom-grid .wa-card:nth-child(2){animation-delay:.14s}
+.mom-grid .wa-card:nth-child(3){animation-delay:.23s}
+.mom-grid .wa-card:nth-child(4){animation-delay:.32s}
+.mom-grid .wa-card:nth-child(5){animation-delay:.41s}
+.mom-grid .wa-card:nth-child(6){animation-delay:.50s}
+.mom-grid .wa-card:nth-child(7){animation-delay:.59s}
+.mom-grid .wa-card:nth-child(8){animation-delay:.68s}
+.mom-grid .wa-card:nth-child(n+9){animation-delay:.77s}
+@keyframes waRise{from{opacity:0;transform:translateY(26px) scale(.96);}to{opacity:1;transform:translateY(0) scale(1);}}
+@keyframes waFadeIn{from{opacity:0;transform:translateY(16px);}to{opacity:1;transform:translateY(0);}}
+@media(prefers-reduced-motion:reduce){.mom-grid .wa-card,.overall-card{animation:none;}}
 .wa-card:hover,.overall-card:hover{transform:translateY(-8px) scale(1.01);box-shadow:0 20px 40px rgba(0,33,71,.16)!important;border-top:5px solid var(--light)!important;}
 .wa-card h5{color:var(--navy)!important;font-weight:900;font-size:15px;margin-bottom:6px;font-family:'Sora',sans-serif;}
 .wa-card .perc{color:var(--blue)!important;font-weight:900;font-size:28px;font-family:'Sora',sans-serif;}

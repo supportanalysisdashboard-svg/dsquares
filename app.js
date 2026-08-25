@@ -2634,18 +2634,6 @@ function hideLoading() {
 }
 
 /* ============================== INIT ============================== */
-function ensureFreshAssets() {
-  try {
-    if (!window.DS_BUILD || !S.meta || !S.meta.build) return false;
-    if (String(window.DS_BUILD).indexOf('DS_BUILD_TOKEN') >= 0) return false;
-    if (window.DS_BUILD === S.meta.build) return false;
-    if (sessionStorage.getItem('ds_reloaded')) return false;
-    sessionStorage.setItem('ds_reloaded', '1');
-    location.reload();
-    return true;
-  } catch (e) { return false; }
-}
-
 async function boot() {
   // reset UI state tied to the session
   S.filters = { dateMode: defaultDateMode(),
@@ -2664,7 +2652,6 @@ async function boot() {
     // try to load again — data may not be built yet
   }
   await refreshLiveAll();
-  if (ensureFreshAssets()) return;
   renderAll();
   showLive();
   startAutoRefresh();
