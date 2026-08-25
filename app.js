@@ -121,16 +121,24 @@ async function loadData(force) {
   S.meta = meta;
   S.build = meta.updated_iso || String(Date.now());
   const opts = force ? { bust: true } : { version: S.build };
-  showLoading('Loading tickets…');
-  S.tickets = await fetchJson('data/tickets.json.gz', opts);
+  // fetch all data files in parallel — total time ≈ slowest file, not their sum
+  const [tickets, agent, sla, redemption, financial, asana] = await Promise.all([
+    fetchJson('data/tickets.json.gz', opts),
+    fetchJson('data/agent.json', opts),
+    fetchJson('data/sla.json', opts),
+    fetchJson('data/redemption.json', opts),
+    fetchJson('data/financial.json', opts),
+    fetchJson('data/asana.json', opts),
+  ]);
+  showLoading('Preparing dashboard…');
+  S.tickets = tickets;
   S.colIdx = {};
   S.tickets.cols.forEach((c, i) => { S.colIdx[c] = i; });
-  showLoading('Loading quality data…');
-  S.agent = await fetchJson('data/agent.json', opts);
-  S.sla = await fetchJson('data/sla.json', opts);
-  S.redemption = normalizeRedemption(await fetchJson('data/redemption.json', opts));
-  S.financial = normalizeFinancial(await fetchJson('data/financial.json', opts));
-  S.asana = await fetchJson('data/asana.json', opts);
+  S.agent = agent;
+  S.sla = sla;
+  S.redemption = normalizeRedemption(redemption);
+  S.financial = normalizeFinancial(financial);
+  S.asana = asana;
 }
 
 /* ============================== LIVE MODE ==============================
@@ -2651,11 +2659,13 @@ async function boot() {
     console.error(e);
     // try to load again — data may not be built yet
   }
-  await refreshLiveAll();
+  // Paint immediately from the bundled (HTTP-cached) data — live Google Sheets
+  // sync continues in the background and re-renders only if something changed.
   renderAll();
   showLive();
   startAutoRefresh();
   hideLoading();
+  refreshLiveAll().then((changed) => { if (changed) renderAll(); }).catch(() => {});
 }
 
 async function init() {
