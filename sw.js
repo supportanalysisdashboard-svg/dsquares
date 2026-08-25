@@ -11,11 +11,9 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
-    caches.open(CACHE).then((c) =>
-      c.keys().then((keys) =>
-        Promise.all(
-          keys.filter((k) => k.url.includes('/data/')).map((k) => c.delete(k))
-        )
+    caches.keys().then((keys) =>
+      Promise.all(
+        keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))
       )
     ).then(() => self.clients.claim())
   );
