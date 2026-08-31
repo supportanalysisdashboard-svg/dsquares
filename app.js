@@ -616,21 +616,23 @@ function countBy(rows, colName, { clean = false, limit = null, sortDesc = true }
   return arr;
 }
 
+function stripOthers(items) {
+  if (!Array.isArray(items)) return items;
+  return items.filter((x) => {
+    const nm = String(x && x.name == null ? '' : x.name).trim().toLowerCase();
+    return nm !== 'others' && nm !== 'other';
+  });
+}
+
 function topWithOthers(items, n = 6) {
-  const sorted = items.slice().sort((a, b) => b.value - a.value);
-  const top = sorted.slice(0, n);
-  const rest = sorted.slice(n);
-  const restSum = rest.reduce((s, x) => s + x.value, 0);
-  if (restSum > 0) {
-    const ex = top.find((x) => String(x.name).trim().toLowerCase() === 'others');
-    if (ex) ex.value += restSum;
-    else top.push({ name: 'Others', value: restSum });
-  }
-  return top;
+  // Exclude the "Others"/"Other" slice entirely and return the top N without
+  // pooling the remainder into a synthetic "Others" bucket.
+  return stripOthers(items).slice().sort((a, b) => b.value - a.value).slice(0, n);
 }
 
 function groupTop(rows, byCol, hoverCol, hoverN, { clean = true } = {}) {
-  const top = countBy(rows, byCol, { clean, limit: 10 });
+  let top = countBy(rows, byCol, { clean, limit: 10 });
+  top = stripOthers(top);
   return top.map((t) => {
     const sub = rows.filter((r) => cleanVal(get(r, byCol)) === t.name);
     const subArr = countBy(sub, hoverCol, { clean: true, limit: hoverN });
@@ -1234,7 +1236,7 @@ function buildOverviewCharts(ffDrill, clientMode, isVf) {
     if (b.length) charts.push({ title: '📍 2. Top 10 Branches', type: 'bar', items: b, base: LIGHT, tooltip: hoverHeader(), click: clickF('District'), wide: false });
     if (isVf) {
       const p = groupTop(ffDrill, 'Project', 'Call Microtype', 5);
-      if (p.length) charts.push({ title: '🏢 3. Top 10 Projects', type: 'bar', items: p, base: NAVY, tooltip: hoverHeader(), click: clickF('Project'), wide: false });
+      if (p.length) charts.push({ title: '🏢 3. Top Projects', type: 'bar', items: p, base: NAVY, tooltip: hoverHeader(), click: clickF('Project'), wide: false });
       const tt = topWithOthers(countBy(ffDrill, 'Ticket type', { clean: true }));
       if (tt.length) charts.push({ title: '🎫 4. Ticket Type Share', type: 'pie', doughnut: true, items: tt, click: clickF('Ticket type') });
       const su = groupTop(ffDrill, 'Ticket subtype', 'Ticket type', 3);
@@ -1245,7 +1247,7 @@ function buildOverviewCharts(ffDrill, clientMode, isVf) {
       if (ac.length) charts.push({ title: '🎬 7. Key Actions Taken', type: 'bar', items: ac, base: NAVY, click: clickF('Action taken'), wide: true });
     } else {
       const tt = topWithOthers(countBy(ffDrill, 'Ticket type', { clean: true }));
-      if (tt.length) charts.push({ title: '🎫 Ticket Type', type: 'pie', items: tt, click: clickF('Ticket type'), wide: false });
+      if (tt.length) charts.push({ title: '🎫 Ticket Type', type: 'pie', doughnut: true, items: tt, click: clickF('Ticket type'), wide: false });
       const su = groupTop(ffDrill, 'Ticket subtype', 'Ticket type', 3);
       if (su.length) charts.push({ title: '🏷️ Top Subtypes', type: 'bar', items: su, base: NAVY, tooltip: hoverHeader(), click: clickF('Ticket subtype'), wide: false });
       const mi = groupTop(ffDrill, 'Call Microtype', 'Ticket subtype', 5);
@@ -1275,6 +1277,7 @@ function buildOverviewCharts(ffDrill, clientMode, isVf) {
 }
 
 function renderChartCard(spec, idx) {
+  spec = Object.assign({}, spec, { items: stripOthers(spec.items) });
   if (spec.type === 'pie') {
     if (spec.doughnut) return typeShareCard(spec.title, spec.items, spec.tooltip, spec.click);
     return pieCard(spec.title, spec.items, spec.tooltip, spec.click);
@@ -1404,7 +1407,7 @@ function renderTeamOverview(dataRows, opts) {
     scRow.innerHTML = cardHtml('📋 Total Tickets', fmt(dataLen), NAVY, analysis(dataLen, baseLen), false)
       + cardHtml('📞 Inbound Calls', fmt(inboundAll.length), BLUE, analysis(inboundAll.length, inboundBase.length), false)
       + cardHtml('💬 WhatsApp', fmt(waAll.length), LIGHT, analysis(waAll.length, waBase.length), false)
-      + queueSlaCard();
+      + (S.session && S.session.role === 'user' ? '' : queueSlaCard());
   }
   frag.appendChild(scRow);
 
