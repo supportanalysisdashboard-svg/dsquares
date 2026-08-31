@@ -1402,12 +1402,22 @@ function renderTeamOverview(dataRows, opts) {
     scRow.innerHTML = cardHtml('📋 Total Tickets', fmt(dataLen), NAVY, analysis(dataLen, baseLen), true)
       + cardHtml('🔧 Resolution Status', fmt(rs), BLUE, [], true)
       + cardHtml('🚨 Urgent Alert', fmt(urgent), RED, [], true);
+  } else if (S.session && S.session.role === 'user') {
+    // dsq123 (user) — centered, concrete scorecards only (no WhatsApp/Inbound/Queue SLA)
+    scRow.className = 'sc-row center';
+    const topM = topSafe(dataRows, 'Merchant');
+    const topT = topSafe(dataRows, 'Ticket type');
+    const topP = topSafe(dataRows, 'Project');
+    scRow.innerHTML = cardHtml('📋 Total Tickets', fmt(dataLen), NAVY, analysis(dataLen, baseLen), true)
+      + cardHtml('🎫 Top Ticket Type', topT, LIGHT, [], true, true)
+      + cardHtml('🏢 Top Project', topP, BLUE, [], true, true)
+      + cardHtml('🏪 Top Merchant', topM, LIGHT, [], true, true);
   } else {
     scRow.className = 'sc-row';
     scRow.innerHTML = cardHtml('📋 Total Tickets', fmt(dataLen), NAVY, analysis(dataLen, baseLen), false)
       + cardHtml('📞 Inbound Calls', fmt(inboundAll.length), BLUE, analysis(inboundAll.length, inboundBase.length), false)
       + cardHtml('💬 WhatsApp', fmt(waAll.length), LIGHT, analysis(waAll.length, waBase.length), false)
-      + (S.session && S.session.role === 'user' ? '' : queueSlaCard());
+      + queueSlaCard();
   }
   frag.appendChild(scRow);
 
@@ -2602,6 +2612,15 @@ function renderDeck(deck) {
     scWrap.innerHTML = `<div class="slide-sc"><div class="l">Total</div><div class="v">${fmt(rows.length)}</div></div>
       <div class="slide-sc"><div class="l">Resolution</div><div class="v">${fmt(rs)}</div></div>
       <div class="slide-sc"><div class="l">Urgent</div><div class="v">${fmt(urgent)}</div></div>`;
+  } else if (S.session && S.session.role === 'user') {
+    // dsq123 (user) — no WhatsApp/Inbound in slideshow, show concrete KPIs only
+    const topM = topSafe(rows, 'Merchant');
+    const topT = topSafe(rows, 'Ticket type');
+    const topP = topSafe(rows, 'Project');
+    scWrap.innerHTML = `<div class="slide-sc"><div class="l">Total</div><div class="v">${fmt(rows.length)}</div></div>
+      <div class="slide-sc"><div class="l">Top Ticket Type</div><div class="v">${esc(topT)}</div></div>
+      <div class="slide-sc"><div class="l">Top Project</div><div class="v">${esc(topP)}</div></div>
+      <div class="slide-sc"><div class="l">Top Merchant</div><div class="v">${esc(topM)}</div></div>`;
   } else {
     const inb = rows.filter((r) => /Inbound|Call/i.test(get(r, 'Type') || '')).length;
     const wa = rows.filter((r) => /WhatsApp|App/i.test(get(r, 'Type') || '')).length;
