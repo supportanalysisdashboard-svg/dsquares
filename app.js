@@ -1952,6 +1952,19 @@ function renderSla() {
 /* ============================== FINANCIAL ACTIONS ============================== */
 function renderFinancial() {
   const content = $('#content');
+  content.innerHTML = `<div class="page-title">💰 Financial Actions</div><div class="empty-msg">Loading latest data…</div>`;
+
+  // Always fetch fresh data directly from the Google Sheet so the user
+  // sees the latest totals/statuses instead of the bundled snapshot.
+  refreshFinancialLive().then((changed) => {
+    renderFinancialInner();
+  }).catch(() => {
+    renderFinancialInner();
+  });
+}
+
+function renderFinancialInner() {
+  const content = $('#content');
   content.innerHTML = `<div class="page-title">💰 Financial Actions</div>`;
   const fin = S.financial;
   if (!fin || !fin.cards || !fin.cards.length) {
