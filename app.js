@@ -1403,15 +1403,15 @@ function renderTeamOverview(dataRows, opts) {
       + cardHtml('🔧 Resolution Status', fmt(rs), BLUE, [], true)
       + cardHtml('🚨 Urgent Alert', fmt(urgent), RED, [], true);
   } else if (S.session && S.session.role === 'user') {
-    // dsq123 (user) — centered, concrete scorecards only (no WhatsApp/Inbound/Queue SLA)
-    scRow.className = 'sc-row center';
+    // dsq123 (user) — same layout as admin merchant tab, concrete scorecards only (no WhatsApp/Inbound/Queue SLA)
+    scRow.className = 'sc-row';
     const topM = topSafe(dataRows, 'Merchant');
     const topT = topSafe(dataRows, 'Ticket type');
     const topP = topSafe(dataRows, 'Project');
-    scRow.innerHTML = cardHtml('📋 Total Tickets', fmt(dataLen), NAVY, analysis(dataLen, baseLen), true)
-      + cardHtml('🎫 Top Ticket Type', topT, LIGHT, [], true, true)
-      + cardHtml('🏢 Top Project', topP, BLUE, [], true, true)
-      + cardHtml('🏪 Top Merchant', topM, LIGHT, [], true, true);
+    scRow.innerHTML = cardHtml('📋 Total Tickets', fmt(dataLen), NAVY, analysis(dataLen, baseLen), false)
+      + cardHtml('🎫 Top Ticket Type', topT, LIGHT, [], false, true)
+      + cardHtml('🏢 Top Project', topP, BLUE, [], false, true)
+      + cardHtml('🏪 Top Merchant', topM, LIGHT, [], false, true);
   } else {
     scRow.className = 'sc-row';
     scRow.innerHTML = cardHtml('📋 Total Tickets', fmt(dataLen), NAVY, analysis(dataLen, baseLen), false)
