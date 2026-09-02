@@ -239,10 +239,17 @@ function applyLiveProjectRename(cols, rows) {
 /* Mirrors pipeline/build_data.py::process_ticket_df — short-name renames,
    date column detection, D_Obj derivation, blank-date row drop. */
 function processLiveTickets(cols, rows) {
+  // The live sheet names the merchant WhatsApp SLA column just "WhatsApp SLA"
+  // (bundled data calls it "WhatsApp SLA Status") — normalize so all the
+  // downstream renderers that look up "WhatsApp SLA Status" keep working.
+  let normCols = cols.slice();
+  if (normCols.indexOf('WhatsApp SLA') >= 0 && normCols.indexOf('WhatsApp SLA Status') < 0) {
+    normCols = normCols.map((c) => (c === 'WhatsApp SLA' ? 'WhatsApp SLA Status' : c));
+  }
   let out = rows.filter((r) => String(r[0] == null ? '' : r[0]).trim() !== '');
   let dateIdx = 0;
-  for (let i = 0; i < cols.length; i++) {
-    const c = cols[i].toLowerCase();
+  for (let i = 0; i < normCols.length; i++) {
+    const c = normCols[i].toLowerCase();
     if (c.indexOf('created') >= 0 || c.indexOf('date') >= 0) { dateIdx = i; break; }
   }
   const parsed = [];
@@ -256,7 +263,7 @@ function processLiveTickets(cols, rows) {
     nr.push(dObj);
     parsed.push(nr);
   }
-  const withStatus = applyLiveStatus(cols.concat(['D_Obj']), parsed);
+  const withStatus = applyLiveStatus(normCols.concat(['D_Obj']), parsed);
   return applyLiveProjectRename(withStatus.cols, withStatus.rows);
 }
 
@@ -503,14 +510,27 @@ async function refreshAsanaLive() {
     const parsed = parseCsv(text);
     const rows = parsed.rows.map((r) => r.map((c) => String(c == null ? '' : c).trim()));
     const gidI = parsed.cols.indexOf('Task GID');
+    const linkI = parsed.cols.indexOf('Asana Link');
     const tsI = parsed.cols.indexOf('Task Status') >= 0 ? parsed.cols.indexOf('Task Status') : parsed.cols.indexOf('Status');
     const tidI = parsed.cols.indexOf('Ticket ID');
     const nameI = parsed.cols.indexOf('Task Name');
+    // Google Sheets may export large Task GIDs in scientific notation (e.g.
+    // "1.21751E+15"), which corrupts the key we use for status tracking. The
+    // full ID lives reliably in the Asana Link (/task/<id>), so fall back to it.
+    const normRow = (r) => {
+      const out = r.slice();
+      if (gidI >= 0 && /e/i.test(out[gidI]) && linkI >= 0) {
+        const m = String(out[linkI]).match(/task\/(\d+)/i);
+        if (m) out[gidI] = m[1];
+      }
+      return out;
+    };
     const statuses = {};
     if (gidI >= 0 && tsI >= 0) {
       for (const r of rows) {
-        const key = String(r[gidI] == null ? '' : r[gidI]).trim() + '|' + String(r[tidI] == null ? '' : r[tidI]).trim();
-        const st = String(r[tsI] == null ? '' : r[tsI]).trim().toLowerCase();
+        const nrw = normRow(r);
+        const key = String(nrw[gidI] == null ? '' : nrw[gidI]).trim() + '|' + String(nrw[tidI] == null ? '' : nrw[tidI]).trim();
+        const st = String(nrw[tsI] == null ? '' : nrw[tsI]).trim().toLowerCase();
         if (key !== '|') statuses[key] = st;
       }
     }
@@ -523,7 +543,10 @@ async function refreshAsanaLive() {
         if (prev && prev !== 'completed' && statuses[key] === 'completed') {
           let nm = key;
           if (nameI >= 0) {
-            const hit = rows.find((r) => String(r[gidI] == null ? '' : r[gidI]).trim() + '|' + String(r[tidI] == null ? '' : r[tidI]).trim() === key);
+            const hit = rows.find((r) => {
+              const nrw = normRow(r);
+              return String(nrw[gidI] == null ? '' : nrw[gidI]).trim() + '|' + String(nrw[tidI] == null ? '' : nrw[tidI]).trim() === key;
+            });
             if (hit) nm = String(hit[nameI] == null ? '' : hit[nameI]).trim() || key;
           }
           newlyCompleted.push({ key, name: nm });
@@ -2016,6 +2039,12 @@ function renderFinancialInner() {
 
 /* ============================== ASANA TRACKER ============================== */
 function renderAsana() {
+  const content = $('#content');
+  content.innerHTML = `<div class="page-title">🔺 Asana Tracker</div><div class="empty-msg">Loading latest data…</div>`;
+  refreshAsanaLive().then(() => { renderAsanaInner(); }).catch(() => { renderAsanaInner(); });
+}
+
+function renderAsanaInner() {
   const content = $('#content');
   content.innerHTML = `<div class="page-title">🔺 Asana Tracker</div>`;
   const as = S.asana;
