@@ -54,6 +54,7 @@ const S = {
   liveStamp: null,
   finLiveStamp: null,
   asaLiveStamp: null,
+  slaLiveStamp: null,
 };
 
 /* ============================== HELPERS ============================== */
@@ -411,7 +412,8 @@ async function refreshLiveData() {
    exact cell layout (gviz compacts blank rows away). Falls back to the bundled
    data (web/data/*) whenever Google is unreachable. */
 const LIVE_FINANCIAL_GID = 1458710714;
-const LIVE_ASANA_GID = 1460146783;
+const LIVE_ASANA_GID = 226182946;
+const LIVE_SLA_GID = 1713632809;
 
 function fetchSheetCsv(gid) {
   const url = 'https://docs.google.com/spreadsheets/d/' + LIVE_SHEET_ID + '/export?format=csv&gid=' + gid + '&_cb=' + Date.now();
@@ -482,6 +484,19 @@ async function refreshFinancialLive() {
   } catch (e) { console.warn('Live financial refresh failed', e); return false; }
 }
 
+async function refreshSlaLive() {
+  try {
+    const text = await fetchSheetCsv(LIVE_SLA_GID);
+    const parsed = parseCsv(text);
+    if (!parsed.cols.length || !parsed.rows.length) return false;
+    const stamp = parsed.rows.length + ':' + parsed.rows[0].join('|');
+    if (stamp === S.slaLiveStamp) return false;
+    S.slaLiveStamp = stamp;
+    S.sla = { cols: parsed.cols, rows: parsed.rows, source: 'live' };
+    return true;
+  } catch (e) { console.warn('Live SLA refresh failed', e); return false; }
+}
+
 async function refreshAsanaLive() {
   try {
     const text = await fetchSheetCsv(LIVE_ASANA_GID);
@@ -524,8 +539,8 @@ async function refreshAsanaLive() {
 }
 
 async function refreshLiveAll() {
-  const [a, b, c] = await Promise.all([refreshLiveData(), refreshFinancialLive(), refreshAsanaLive()]);
-  return a || b || c;
+  const [a, b, c, d] = await Promise.all([refreshLiveData(), refreshFinancialLive(), refreshAsanaLive(), refreshSlaLive()]);
+  return a || b || c || d;
 }
 
 /* ------------------------------ FILTER PIPELINE ------------------------------ */
@@ -1898,6 +1913,12 @@ function renderWhatsApp() {
 
 /* ============================== INBOUND SLA ============================== */
 function renderSla() {
+  const content = $('#content');
+  content.innerHTML = `<div class="page-title">📈 Inbound SLA Performance</div><div class="empty-msg">Loading latest data…</div>`;
+  refreshSlaLive().then(() => { renderSlaInner(); }).catch(() => { renderSlaInner(); });
+}
+
+function renderSlaInner() {
   const content = $('#content');
   content.innerHTML = `<div class="page-title">📈 Inbound SLA Performance</div>`;
   const sla = S.sla;
