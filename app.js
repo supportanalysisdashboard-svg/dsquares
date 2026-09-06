@@ -504,6 +504,117 @@ async function refreshSlaLive() {
   } catch (e) { console.warn('Live SLA refresh failed', e); return false; }
 }
 
+const LIVE_QUALITY_GID = 10002;
+
+// 🏆 Live read of the "Agent Quality Board" tab (gid 10002). The sheet is a
+// manually-restructured "Agent Performance Dashboard" with three labelled
+// sections (summary, top errors, per-agent errors). Sections are located by
+// label search so the read keeps working if rows move. Populates both
+// S.meta.quality (summary/top/per-agent errors) and S.agent (per-agent bar + KPIs)
+// so the Quality Board tab always reflects the latest sheet edits.
+async function refreshQualityLive() {
+  try {
+    const text = await fetchSheetCsv(LIVE_QUALITY_GID);
+    const parsed = parseCsv(text);
+    const cell = (r, i) => String((r && r[i]) == null ? '' : r[i]).trim();
+    const norm = (v) => String(v == null ? '' : v).trim().toLowerCase();
+    const rows = parsed.rows.map((r) => r.map((c) => String(c == null ? '' : c).trim()));
+
+    const agent_summary = [];
+    const per_agent = [];
+    const top_errors = { EC: [], BC: [], NC: [] };
+    const per_agent_errors = [];
+    let totalVolume = 0, waVolume = 0, callVolume = 0;
+
+    // ---------- Summary ---------- header: Agent Name | Total Volume | Avg EC% | Avg BC% | Overall Avg
+    const si = rows.findIndex((r) => norm(cell(r, 1)) === 'agent name' && norm(cell(r, 2)) === 'total volume');
+    if (si >= 0) {
+      // the "Total Calls"/"Total WhatsApp" markers sit in the same block
+      for (let j = si; j < rows.length; j++) {
+        const r = rows[j];
+        if (norm(cell(r, 7)) === 'total calls') callVolume = numOf(cell(r, 8), 0);
+        if (norm(cell(r, 7)) === 'total whatsapp') waVolume = numOf(cell(r, 8), 0);
+        if (norm(cell(r, 10)) === 'total whatsapp') waVolume = numOf(cell(r, 11), 0);
+      }
+      for (let j = si + 1; j < rows.length; j++) {
+        const r = rows[j];
+        const name = cell(r, 1);
+        if (!name) break;
+        if (norm(name) === 'top ec errors' || norm(cell(r, 9)) === 'top nc errors') break;
+        const vol = cell(r, 2), ec = cell(r, 3), bc = cell(r, 4), oa = cell(r, 5);
+        // skip leftover partial rows that carry only name+volume (no scored values)
+        if (vol === '' || (ec === '' && bc === '' && oa === '')) continue;
+        const rec = {
+          name,
+          volume: numOf(vol, 0),
+          avg_ec: ec === '' ? null : numOf(ec, 0),
+          avg_bc: bc === '' ? null : numOf(bc, 0),
+          overall: oa === '' ? null : numOf(oa, 0),
+        };
+        agent_summary.push(rec);
+        per_agent.push({ agent: name, ec: rec.avg_ec == null ? 0 : rec.avg_ec, bc: rec.avg_bc == null ? 0 : rec.avg_bc });
+        totalVolume += rec.volume;
+      }
+    }
+
+    // ---------- Top errors ---------- header: Top EC Errors(1),Count(2) .. Top BC Errors(5),Count(6) .. Top NC Errors(9),Count(10)
+    const ti = rows.findIndex((r) => norm(cell(r, 1)) === 'top ec errors');
+    if (ti >= 0) {
+      const slots = { EC: [1, 2], BC: [5, 6], NC: [9, 10] };
+      for (let j = ti + 1; j < rows.length; j++) {
+        const r = rows[j];
+        if ((cell(r, 1) === '' && cell(r, 5) === '' && cell(r, 9) === '') || norm(cell(r, 1)) === 'agent') break;
+        for (const et of ['EC', 'BC', 'NC']) {
+          const [nameI, cntI] = slots[et];
+          const nm = cell(r, nameI), cnt = cell(r, cntI);
+          if (nm && cnt !== '' && numOf(cnt, 0) > 0) top_errors[et].push({ name: nm, count: numOf(cnt, 0) });
+        }
+      }
+    }
+
+    // ---------- Per-agent errors ---------- header: Agent(1),EC Error(2),Count(3) .. Agent(5),BC Error(6),Count(7) .. Agent(9),NC Error(10),Count(11)
+    const pi = rows.findIndex((r) => norm(cell(r, 1)) === 'agent' && norm(cell(r, 2)) === 'ec error');
+    if (pi >= 0) {
+      const slots = { EC: [1, 2, 3], BC: [5, 6, 7], NC: [9, 10, 11] };
+      for (let j = pi + 1; j < rows.length; j++) {
+        const r = rows[j];
+        const nonEmpty = Object.values(slots).some(([ag]) => cell(r, ag) !== '');
+        if (!nonEmpty) break;
+        for (const et of ['EC', 'BC', 'NC']) {
+          const [agI, errI, cntI] = slots[et];
+          const ag = cell(r, agI), err = cell(r, errI), cnt = cell(r, cntI);
+          if (ag && err && cnt !== '') {
+            per_agent_errors.push({ agent: ag, type: et, error: err, count: numOf(cnt, 0) });
+          }
+        }
+      }
+    }
+
+    // if nothing was parsed, keep existing (bundled) data
+    if (!agent_summary.length && !per_agent_errors.length && !top_errors.EC.length) return false;
+
+    const stamp = JSON.stringify({ a: agent_summary, t: top_errors, p: per_agent_errors, c: [totalVolume, waVolume, callVolume] });
+    if (stamp === S.qualLiveStamp) return false;
+    S.qualLiveStamp = stamp;
+
+    const summary = {
+      avg_ec: agent_summary.length ? Math.round(agent_summary.reduce((s, x) => s + (x.avg_ec || 0), 0) / agent_summary.length * 10) / 10 : null,
+      avg_bc: agent_summary.length ? Math.round(agent_summary.reduce((s, x) => s + (x.avg_bc || 0), 0) / agent_summary.length * 10) / 10 : null,
+      total_volume: totalVolume,
+      wa_volume: waVolume,
+      call_volume: callVolume,
+    };
+
+    if (!S.meta) S.meta = {};
+    S.meta.quality = { agent_summary, top_errors, per_agent_errors, source: 'live' };
+    S.agent = { summary, per_agent, source: 'live' };
+    return true;
+  } catch (e) {
+    console.warn('Live quality refresh failed — keeping bundled data', e);
+    return false;
+  }
+}
+
 async function refreshAsanaLive() {
   try {
     const text = await fetchSheetCsv(LIVE_ASANA_GID);
@@ -562,8 +673,8 @@ async function refreshAsanaLive() {
 }
 
 async function refreshLiveAll() {
-  const [a, b, c, d] = await Promise.all([refreshLiveData(), refreshFinancialLive(), refreshAsanaLive(), refreshSlaLive()]);
-  return a || b || c || d;
+  const [a, b, c, d, e] = await Promise.all([refreshLiveData(), refreshFinancialLive(), refreshAsanaLive(), refreshSlaLive(), refreshQualityLive()]);
+  return a || b || c || d || e;
 }
 
 /* ------------------------------ FILTER PIPELINE ------------------------------ */
@@ -1108,7 +1219,15 @@ function renderSidebar() {
     const btn = $('#btn-refresh');
     btn.textContent = '↻ Refreshing…';
     btn.disabled = true;
-    try { await loadData(true); } catch (e) { console.error(e); }
+    try {
+      // Like a fresh page load: re-read all live sheets first (Google), then
+      // fall back to re-fetching the bundled data as a safety net.
+      let changed = false;
+      try { changed = await refreshLiveAll(); } catch (err) { console.error(err); }
+      if (!S.liveActive || !changed) {
+        try { await loadData(true); } catch (e) { console.error(e); }
+      }
+    } catch (e) { console.error(e); }
     btn.textContent = '🔄 Refresh Data Now';
     btn.disabled = false;
     renderAll();
@@ -1739,6 +1858,12 @@ function normQuality(q) {
 
 /* ============================== QUALITY BOARD ============================== */
 function renderQuality() {
+  const content = $('#content');
+  content.innerHTML = `<div class="page-title">🏆 Agent Quality Board</div><div class="empty-msg">Loading latest data…</div>`;
+  refreshQualityLive().then(() => { renderQualityInner(); }).catch(() => { renderQualityInner(); });
+}
+
+function renderQualityInner() {
   const content = $('#content');
   content.innerHTML = `<div class="page-title">🏆 Agent Quality Board</div>`;
   const wrap = document.createElement('div');
