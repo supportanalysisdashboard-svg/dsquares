@@ -1876,12 +1876,16 @@ function renderQualityInner() {
   const sumVol = q.agent_summary.length
     ? q.agent_summary.reduce((s, r) => s + numOf(pick(r, ['Volume', 'volume', 'total_volume', 'totalVolume']), 0), 0)
     : 0;
+  const waVol = numOf(aggM.wa_volume, firstM.wa_volume);
+  const callVol = numOf(aggM.call_volume, firstM.call_volume);
   const metrics = {
     avg_ec: aggM.avg_ec != null ? aggM.avg_ec : firstM.avg_ec,
     avg_bc: aggM.avg_bc != null ? aggM.avg_bc : firstM.avg_bc,
-    total_volume: sumVol > 0 ? sumVol : numOf(aggM.total_volume, 0),
-    wa_volume: numOf(aggM.wa_volume, firstM.wa_volume),
-    call_volume: numOf(aggM.call_volume, firstM.call_volume),
+    // Total Volume = Total Monitoring (Calls + WhatsApp) من الشيت نفسه — مش مجموع
+    // الـ per-agent volumes اللي ممكن يكون قديم/ناقص (زي 521+508+... = 2479).
+    total_volume: (waVol > 0 && callVol > 0) ? waVol + callVol : (sumVol > 0 ? sumVol : numOf(aggM.total_volume, 0)),
+    wa_volume: waVol,
+    call_volume: callVol,
   };
 
   const hasAny = (metrics.avg_ec != null || metrics.avg_bc != null || metrics.total_volume > 0)
