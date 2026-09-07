@@ -2451,10 +2451,11 @@ function renderAsanaInner() {
     const sCntI = sp.cols.indexOf('Subtasks Count');
     const sDetI = sp.cols.indexOf('Subtasks Details');
     const sCmtI = sp.cols.indexOf('Latest Comments & Updates');
-    const multi = (v) => String(v == null ? '' : v).replace(/\r\n/g, '\n').split('\n').map((l) => esc(l)).join('<br>');
+    const multi = (v) => String(v == null ? '' : v).replace(/\r\n/g, '\n');
+    const htmlMultiline = (v) => multi(v).split('\n').map((l) => esc(l)).join('<br>');
     const searchRow = document.createElement('div');
     searchRow.className = 'drill-row';
-    searchRow.innerHTML = `<input class="search-input" id="asana-sub-search" placeholder="🔍 Search task / ticket…" style="flex:1;min-width:200px;">`;
+    searchRow.innerHTML = `<input class="search-input" id="asana-sub-search" placeholder="🔍 Search task / ticket…" style="flex:1;min-width:200px;"><button class="dl-btn" id="asana-sub-export" style="white-space:nowrap;">📥 Extract CSV</button>`;
     content.appendChild(searchRow);
     const subWrap = document.createElement('div');
     subWrap.className = 'table-wrap';
@@ -2468,17 +2469,28 @@ function renderAsanaInner() {
         det: sDetI >= 0 ? multi(r[sDetI]) : '',
         cmt: sCmtI >= 0 ? multi(r[sCmtI]) : '',
       }));
+    let curSub = [];
     const drawSub = () => {
       const q = cleanVal($('#asana-sub-search').value).toLowerCase();
-      const list = q ? subData.filter((x) => x.task.toLowerCase().includes(q) || x.tid.toLowerCase().includes(q)) : subData;
-      subTitle.textContent = `🧩 Subtasks & Comments (${fmt(list.length)})`;
-      subWrap.innerHTML = list.length ? renderTable(
+      curSub = q ? subData.filter((x) => x.task.toLowerCase().includes(q) || x.tid.toLowerCase().includes(q)) : subData;
+      subTitle.textContent = `🧩 Subtasks & Comments (${fmt(curSub.length)})`;
+      subWrap.innerHTML = curSub.length ? renderTable(
         ['🏷️ Task Name', '🎫 Ticket ID', '🔢 Subtasks Count', '🧩 Subtasks Details', '💬 Latest Comments & Updates'],
-        list.map((x) => [x.task, x.tid, x.cnt, x.det, x.cmt]), [3, 4])
+        curSub.map((x) => [x.task, x.tid, x.cnt, htmlMultiline(x.det), htmlMultiline(x.cmt)]), [3, 4])
         : '<div class="empty-msg">No matching tasks</div>';
     };
     drawSub();
     $('#asana-sub-search').addEventListener('input', drawSub);
+    $('#asana-sub-export').addEventListener('click', () => {
+      const csv = csvOf(['Task Name', 'Ticket ID', 'Subtasks Count', 'Subtasks Details', 'Latest Comments & Updates'],
+        curSub.map((x) => [x.task, x.tid, x.cnt, x.det, x.cmt]));
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'asana_subtasks_comments.csv';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
   } else {
     const empty = document.createElement('div');
     empty.className = 'empty-msg';
