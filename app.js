@@ -2873,13 +2873,15 @@ async function boot() {
     console.error(e);
     // try to load again — data may not be built yet
   }
-  // Paint immediately from the bundled (HTTP-cached) data — live Google Sheets
-  // sync continues in the background and re-renders only if something changed.
+  // 🎯 استنى اللوحة (live) تخلص قبل أول رسمة، عشان مفيش فلاش على أرقام قديمة
+  // (كان بيظهر bundled قديم ≈ ثانية +، وبعدين يتصلح بالـ live). لو الـ live فشل
+  // بنرسم من الـ bundled كـ fallback عدل.
+  showLoading('Loading latest data…');
+  try { await refreshLiveAll(); } catch (e) { console.error(e); }
   renderAll();
   showLive();
   startAutoRefresh();
   hideLoading();
-  refreshLiveAll().then((changed) => { if (changed) renderAll(); }).catch(() => {});
 }
 
 async function init() {
