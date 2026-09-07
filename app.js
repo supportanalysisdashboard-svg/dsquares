@@ -2438,10 +2438,10 @@ function renderAsanaInner() {
     fuWrap.innerHTML = '<div class="empty-msg">No ticket data available</div>';
   }
 
-  // ---- 🧩 Subtasks & Updates table (sheet gid 1864268769) ----
+  // ---- 🧩 Subtasks & Comments table (sheet gid 1864268769) ----
   const subTitle = document.createElement('div');
   subTitle.className = 'st-section-title';
-  subTitle.textContent = '🧩 Subtasks & Updates';
+  subTitle.textContent = '🧩 Subtasks & Comments';
   content.appendChild(subTitle);
 
   const sp = S.asanaSubtasks;
@@ -2471,7 +2471,7 @@ function renderAsanaInner() {
     const drawSub = () => {
       const q = cleanVal($('#asana-sub-search').value).toLowerCase();
       const list = q ? subData.filter((x) => x.task.toLowerCase().includes(q) || x.tid.toLowerCase().includes(q)) : subData;
-      subTitle.textContent = `🧩 Subtasks & Updates (${fmt(list.length)})`;
+      subTitle.textContent = `🧩 Subtasks & Comments (${fmt(list.length)})`;
       subWrap.innerHTML = list.length ? renderTable(
         ['🏷️ Task Name', '🎫 Ticket ID', '🔢 Subtasks Count', '🧩 Subtasks Details', '💬 Latest Comments & Updates'],
         list.map((x) => [x.task, x.tid, x.cnt, x.det, x.cmt]), [3, 4])
