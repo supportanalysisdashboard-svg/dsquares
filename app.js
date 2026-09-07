@@ -420,6 +420,7 @@ async function refreshLiveData() {
    data (web/data/*) whenever Google is unreachable. */
 const LIVE_FINANCIAL_GID = 1458710714;
 const LIVE_ASANA_GID = 226182946;
+const LIVE_ASANA_SUBTASKS_GID = 1864268769;
 const LIVE_SLA_GID = 1713632809;
 
 function fetchSheetCsv(gid) {
@@ -672,9 +673,26 @@ async function refreshAsanaLive() {
   } catch (e) { console.warn('Live asana refresh failed', e); return false; }
 }
 
+// 🧩 Live read of the "Asana Subtasks / Updates" tab (gid 1864268769). Renders a
+// table below the Asana Tracker: Task Name | Ticket ID | Subtasks Count |
+// Subtasks Details | Latest Comments & Updates.
+async function refreshAsanaSubtasksLive() {
+  try {
+    const text = await fetchSheetCsv(LIVE_ASANA_SUBTASKS_GID);
+    const parsed = parseCsv(text);
+    if (!parsed.cols.length || !parsed.rows.length) return false;
+    // stamp على المحتوى نفسه (مش عدد الصفوف بس) عشان يلقط أي تعديل في أي سطر
+    const stamp = parsed.rows.length + ':' + JSON.stringify(parsed.rows);
+    if (stamp === S.asaSubLiveStamp) return false;
+    S.asaSubLiveStamp = stamp;
+    S.asanaSubtasks = { cols: parsed.cols, rows: parsed.rows, source: 'live' };
+    return true;
+  } catch (e) { console.warn('Live asana subtasks refresh failed', e); return false; }
+}
+
 async function refreshLiveAll() {
-  const [a, b, c, d, e] = await Promise.all([refreshLiveData(), refreshFinancialLive(), refreshAsanaLive(), refreshSlaLive(), refreshQualityLive()]);
-  return a || b || c || d || e;
+  const [a, b, c, d, e, f] = await Promise.all([refreshLiveData(), refreshFinancialLive(), refreshAsanaLive(), refreshSlaLive(), refreshQualityLive(), refreshAsanaSubtasksLive()]);
+  return a || b || c || d || e || f;
 }
 
 /* ------------------------------ FILTER PIPELINE ------------------------------ */
@@ -2170,7 +2188,7 @@ function renderFinancialInner() {
 function renderAsana() {
   const content = $('#content');
   content.innerHTML = `<div class="page-title">🔺 Asana Tracker</div><div class="empty-msg">Loading latest data…</div>`;
-  refreshAsanaLive().then(() => { renderAsanaInner(); }).catch(() => { renderAsanaInner(); });
+  Promise.all([refreshAsanaLive(), refreshAsanaSubtasksLive()]).then(() => { renderAsanaInner(); }).catch(() => { renderAsanaInner(); });
 }
 
 function renderAsanaInner() {
@@ -2418,6 +2436,54 @@ function renderAsanaInner() {
       : '<div class="empty-msg">No Follow-Up tickets</div>';
   } else {
     fuWrap.innerHTML = '<div class="empty-msg">No ticket data available</div>';
+  }
+
+  // ---- 🧩 Subtasks & Updates table (sheet gid 1864268769) ----
+  const subTitle = document.createElement('div');
+  subTitle.className = 'st-section-title';
+  subTitle.textContent = '🧩 Subtasks & Updates';
+  content.appendChild(subTitle);
+
+  const sp = S.asanaSubtasks;
+  if (sp && sp.cols && sp.rows && sp.rows.length) {
+    const sTaskI = sp.cols.indexOf('Task Name');
+    const sTidI = sp.cols.indexOf('Ticket ID');
+    const sCntI = sp.cols.indexOf('Subtasks Count');
+    const sDetI = sp.cols.indexOf('Subtasks Details');
+    const sCmtI = sp.cols.indexOf('Latest Comments & Updates');
+    const multi = (v) => String(v == null ? '' : v).replace(/\r\n/g, '\n').split('\n').map((l) => esc(l)).join('<br>');
+    const searchRow = document.createElement('div');
+    searchRow.className = 'drill-row';
+    searchRow.innerHTML = `<input class="search-input" id="asana-sub-search" placeholder="🔍 Search task / ticket…" style="flex:1;min-width:200px;">`;
+    content.appendChild(searchRow);
+    const subWrap = document.createElement('div');
+    subWrap.className = 'table-wrap';
+    content.appendChild(subWrap);
+    const subData = sp.rows
+      .filter((r) => r && (sTaskI < 0 || String(r[sTaskI] == null ? '' : r[sTaskI]).trim() !== ''))
+      .map((r) => ({
+        task: sTaskI >= 0 ? String(r[sTaskI] == null ? '' : r[sTaskI]).trim() : '',
+        tid: sTidI >= 0 ? String(r[sTidI] == null ? '' : r[sTidI]).trim() : '',
+        cnt: sCntI >= 0 ? String(r[sCntI] == null ? '' : r[sCntI]).trim() : '',
+        det: sDetI >= 0 ? multi(r[sDetI]) : '',
+        cmt: sCmtI >= 0 ? multi(r[sCmtI]) : '',
+      }));
+    const drawSub = () => {
+      const q = cleanVal($('#asana-sub-search').value).toLowerCase();
+      const list = q ? subData.filter((x) => x.task.toLowerCase().includes(q) || x.tid.toLowerCase().includes(q)) : subData;
+      subTitle.textContent = `🧩 Subtasks & Updates (${fmt(list.length)})`;
+      subWrap.innerHTML = list.length ? renderTable(
+        ['🏷️ Task Name', '🎫 Ticket ID', '🔢 Subtasks Count', '🧩 Subtasks Details', '💬 Latest Comments & Updates'],
+        list.map((x) => [x.task, x.tid, x.cnt, x.det, x.cmt]), [3, 4])
+        : '<div class="empty-msg">No matching tasks</div>';
+    };
+    drawSub();
+    $('#asana-sub-search').addEventListener('input', drawSub);
+  } else {
+    const empty = document.createElement('div');
+    empty.className = 'empty-msg';
+    empty.textContent = 'No subtasks / updates data available';
+    content.appendChild(empty);
   }
 }
 
