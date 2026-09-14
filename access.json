@@ -1,7 +1,6 @@
 {
   "admin": "admin123",
   "user": "dsq123",
-  "field": "field123",
   "clients": {
     "vodafone123": { "projects": ["Red", "Red DOM", "Redrebalance (HHT)", "VF Enterprise Packs", "Sherkety", "Red Ramadan", "VF Red Ramadan", "VF Mass Retail", "VF Marketplace", "VF Cash Deals"], "is_vodafone": true, "logo": "logo_RED.png" },
     "nbe123": { "projects": ["Alahly Points"], "is_vodafone": false, "logo": "logo_NBE.png" },
