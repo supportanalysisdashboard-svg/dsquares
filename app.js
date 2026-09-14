@@ -1302,7 +1302,7 @@ function renderHeader() {
 }
 
 function tabsForRole() {
-  if (S.session.role === 'admin') return ['Overview','WhatsApp MOM','Inbound SLA','Quality Board','Financial Actions','Asana Tracker','Ticket Explorer'];
+  if (S.session.role === 'admin') return ['Overview','WhatsApp MOM','Inbound SLA','Quality Board','Asana Tracker','Ticket Explorer'];
   if (S.session.role === 'user') return ['Overview','Ticket Explorer'];
   return null;
 }
@@ -2790,7 +2790,6 @@ function renderAll() {
     else if (name === 'Quality Board') renderQuality();
     else if (name === 'WhatsApp MOM') renderWhatsApp();
     else if (name === 'Inbound SLA') renderSla();
-    else if (name === 'Financial Actions') renderFinancial();
     else if (name === 'Asana Tracker') renderAsana();
     else if (name === 'Ticket Explorer') renderExplorer();
   }
