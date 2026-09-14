@@ -1089,6 +1089,7 @@ function submitLogin() {
   if (!key) return;
   if (key === S.auth.admin) { S.session = { role: 'admin', key }; }
   else if (key === S.auth.user) { S.session = { role: 'user', key }; }
+  else if (key === S.auth.field) { S.session = { role: 'field', key }; }
   else if (S.auth.clients[key]) {
     const c = S.auth.clients[key];
     S.session = { role: 'client', key, projects: c.projects, is_vodafone: !!c.is_vodafone, logo: c.logo || null };
@@ -1303,7 +1304,8 @@ function renderHeader() {
 
 function tabsForRole() {
   if (S.session.role === 'admin') return ['Overview','WhatsApp MOM','Inbound SLA','Quality Board','Asana Tracker','Ticket Explorer'];
-  if (S.session.role === 'user') return ['Overview','Ticket Explorer','Asana Tracker'];
+  if (S.session.role === 'user') return ['Overview','Ticket Explorer'];
+  if (S.session.role === 'field') return ['Overview','Ticket Explorer','Asana Tracker'];
   return null;
 }
 
@@ -1577,8 +1579,8 @@ function renderTeamOverview(dataRows, opts) {
     scRow.innerHTML = cardHtml('📋 Total Tickets', fmt(dataLen), NAVY, analysis(dataLen, baseLen), true)
       + cardHtml('🔧 Resolution Status', fmt(rs), BLUE, [], true)
       + cardHtml('🚨 Urgent Alert', fmt(urgent), RED, [], true);
-  } else if (S.session && S.session.role === 'user') {
-    // dsq123 (user) — same layout as admin merchant tab, concrete scorecards only (no WhatsApp/Inbound/Queue SLA)
+  } else if (S.session && (S.session.role === 'user' || S.session.role === 'field')) {
+    // dsq123 / field123 (user) — same layout as admin merchant tab, concrete scorecards only (no WhatsApp/Inbound/Queue SLA)
     scRow.className = 'sc-row';
     const topM = topSafe(dataRows, 'Merchant');
     const topT = topSafe(dataRows, 'Ticket type');
@@ -2622,9 +2624,10 @@ function loadOverrides() {
 function saveOverrides(o) { localStorage.setItem(OVERRIDES_KEY, JSON.stringify(o)); }
 function mergeAuth(base) {
   const o = loadOverrides();
-  const auth = { admin: base.admin, user: base.user, clients: Object.assign({}, base.clients || {}) };
+  const auth = { admin: base.admin, user: base.user, field: base.field, clients: Object.assign({}, base.clients || {}) };
   if (o.admin != null) auth.admin = o.admin;
   if (o.user != null) auth.user = o.user;
+  if (o.field != null) auth.field = o.field;
   (o.removed || []).forEach((k) => { delete auth.clients[k]; });
   Object.assign(auth.clients, o.added || {});
   return auth;
@@ -2647,7 +2650,7 @@ function renderAccessMgmt() {
     <div class="st-section-title">➕ Add New Access</div>
     <div class="am-form">
       <label class="am-f">Key / Password<input id="am-key" class="search-input" placeholder="e.g. newclient123"></label>
-      <label class="am-f">Role<select id="am-role" class="select-sel"><option value="client">Client</option><option value="admin">Admin</option><option value="user">User</option></select></label>
+      <label class="am-f">Role<select id="am-role" class="select-sel"><option value="client">Client</option><option value="admin">Admin</option><option value="user">User</option><option value="field">Field</option></select></label>
       <label class="am-f" id="am-f-projects">Projects (comma separated)<input id="am-projects" class="search-input" placeholder="e.g. Project A, Project B"></label>
       <label class="am-f" id="am-f-vf"><span>Vodafone</span><input id="am-vf" type="checkbox" style="width:auto;transform:scale(1.4);margin-top:8px;"></label>
       <label class="am-f" id="am-f-logo"><span>Logo</span>
@@ -2665,6 +2668,7 @@ function renderAccessMgmt() {
     <div class="am-form">
       <label class="am-f">Admin key<input id="am-admin" class="search-input" value="${esc(S.auth.admin || '')}"></label>
       <label class="am-f">User key<input id="am-user" class="search-input" value="${esc(S.auth.user || '')}"></label>
+      <label class="am-f">Field key<input id="am-field" class="search-input" value="${esc(S.auth.field || '')}"></label>
       <div class="am-actions"><button class="dl-btn" id="am-save-keys">💾 Save Keys</button></div>
     </div>
 
@@ -2715,6 +2719,7 @@ function renderAccessMgmt() {
     o.removed = (o.removed || []).filter((k) => k !== key);
     if (roleSel.value === 'admin') o.admin = key;
     else if (roleSel.value === 'user') o.user = key;
+    else if (roleSel.value === 'field') o.field = key;
     else {
       o.added = o.added || {};
       o.added[key] = {
@@ -2732,6 +2737,7 @@ function renderAccessMgmt() {
     const o = loadOverrides();
     o.admin = cleanVal($('#am-admin').value);
     o.user = cleanVal($('#am-user').value);
+    o.field = cleanVal($('#am-field').value);
     saveOverrides(o);
     applyAccessOverrides();
     renderAccessMgmt();
@@ -2753,7 +2759,7 @@ function renderAccessMgmt() {
   });
 
   $('#am-download').addEventListener('click', () => {
-    const data = JSON.stringify({ admin: S.auth.admin, user: S.auth.user, clients: S.auth.clients }, null, 2);
+    const data = JSON.stringify({ admin: S.auth.admin, user: S.auth.user, field: S.auth.field, clients: S.auth.clients }, null, 2);
     const blob = new Blob([data], { type: 'application/json;charset=utf-8;' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -2881,8 +2887,8 @@ function renderDeck(deck) {
     scWrap.innerHTML = `<div class="slide-sc"><div class="l">Total</div><div class="v">${fmt(rows.length)}</div></div>
       <div class="slide-sc"><div class="l">Resolution</div><div class="v">${fmt(rs)}</div></div>
       <div class="slide-sc"><div class="l">Urgent</div><div class="v">${fmt(urgent)}</div></div>`;
-  } else if (S.session && S.session.role === 'user') {
-    // dsq123 (user) — no WhatsApp/Inbound in slideshow, show concrete KPIs only
+  } else if (S.session && (S.session.role === 'user' || S.session.role === 'field')) {
+    // dsq123 / field123 — no WhatsApp/Inbound in slideshow, show concrete KPIs only
     const topM = topSafe(rows, 'Merchant');
     const topT = topSafe(rows, 'Ticket type');
     const topP = topSafe(rows, 'Project');
@@ -2989,7 +2995,7 @@ async function init() {
   if (saved) {
     try {
       const sess = JSON.parse(saved);
-      const valid = sess.role === 'admin' || sess.role === 'user' || S.auth.clients[sess.key];
+      const valid = sess.role === 'admin' || sess.role === 'user' || sess.role === 'field' || S.auth.clients[sess.key];
       if (valid) {
         S.session = sess;
         if (sess.role === 'client') {
