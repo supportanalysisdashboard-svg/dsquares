@@ -1303,7 +1303,7 @@ function renderHeader() {
 
 function tabsForRole() {
   if (S.session.role === 'admin') return ['Overview','WhatsApp MOM','Inbound SLA','Quality Board','Asana Tracker','Ticket Explorer'];
-  if (S.session.role === 'user') return ['Overview','Ticket Explorer'];
+  if (S.session.role === 'user') return ['Overview','Ticket Explorer','Asana Tracker'];
   return null;
 }
 
