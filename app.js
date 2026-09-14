@@ -2989,13 +2989,17 @@ async function init() {
   $('#login-btn').addEventListener('click', submitLogin);
   $('#login-key').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitLogin(); });
 
-  S.authBase = await fetchJson('access.json');
+  S.authBase = await fetchJson('access.json?_=' + Date.now());
   S.auth = mergeAuth(S.authBase);
 
   if (saved) {
     try {
       const sess = JSON.parse(saved);
-      const valid = sess.role === 'admin' || sess.role === 'user' || sess.role === 'field' || S.auth.clients[sess.key];
+      const valid =
+        (sess.role === 'admin' && sess.key === S.auth.admin) ||
+        (sess.role === 'user' && sess.key === S.auth.user) ||
+        (sess.role === 'field' && sess.key === S.auth.field) ||
+        (sess.role === 'client' && !!S.auth.clients[sess.key]);
       if (valid) {
         S.session = sess;
         if (sess.role === 'client') {
@@ -3007,6 +3011,7 @@ async function init() {
         await boot();
         return;
       }
+      localStorage.removeItem('ds_session');
     } catch (e) {}
   }
   showLogin();
