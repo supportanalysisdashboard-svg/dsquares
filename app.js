@@ -423,6 +423,12 @@ const LIVE_ASANA_GID = 226182946;
 const LIVE_ASANA_SUBTASKS_GID = 1864268769;
 const LIVE_SLA_GID = 1713632809;
 
+// 🔐 رابط Apps Script Web App (pipeline/access_api.gs) — اللي بيتحفظ منه تعديلات
+// 🔐 Access Management فوراً بشكل دائم لكل المتصفحات. لو سايبه فاضية ('') بيشتغل
+// على access.json الملف (بدون حفظ دائم) — لحد ما نربط الرابط.
+const ACCESS_API_URL = '';
+const AUTH_SNAP_KEY = 'ds_auth_snap';
+
 function fetchSheetCsv(gid) {
   const url = 'https://docs.google.com/spreadsheets/d/' + LIVE_SHEET_ID + '/export?format=csv&gid=' + gid + '&_cb=' + Date.now();
   return fetch(url, { cache: 'no-store' }).then((res) => {
@@ -2615,23 +2621,55 @@ function renderExplorer() {
 }
 
 /* ============================== ACCESS MGMT ============================== */
-const OVERRIDES_KEY = 'ds_access_overrides';
-function loadOverrides() {
-  try { return JSON.parse(localStorage.getItem(OVERRIDES_KEY)) || {}; } catch (e) { return {}; }
+// المنظومة الجديدة: الـ config المصدر الأساسي له من Web App (access_api.gs) لو
+// ACCESS_API_URL متظبط — ولو غُلب (offline/خطأ) يرجع لآخر نسخة محفوظة في
+// الـ localStorage، ولو مفيش يرجع لملف access.json العادي.
+function cloneAuth(base) {
+  return { admin: base.admin, user: base.user, clients: Object.assign({}, (base && base.clients) || {}) };
 }
-function saveOverrides(o) { localStorage.setItem(OVERRIDES_KEY, JSON.stringify(o)); }
-function mergeAuth(base) {
-  const o = loadOverrides();
-  const auth = { admin: base.admin, user: base.user, clients: Object.assign({}, base.clients || {}) };
-  if (o.admin != null) auth.admin = o.admin;
-  if (o.user != null) auth.user = o.user;
-  (o.removed || []).forEach((k) => { delete auth.clients[k]; });
-  Object.assign(auth.clients, o.added || {});
-  return auth;
+function saveAuthSnap(auth) { try { localStorage.setItem(AUTH_SNAP_KEY, JSON.stringify(auth)); } catch (e) {} }
+function loadAuthSnap() { try { return JSON.parse(localStorage.getItem(AUTH_SNAP_KEY)) || null; } catch (e) { return null; } }
+
+async function loadAuthBase() {
+  if (ACCESS_API_URL) {
+    try {
+      const res = await fetch(ACCESS_API_URL, { cache: 'no-store' });
+      if (res.ok) {
+        const auth = await res.json();
+        if (auth && typeof auth === 'object' && 'admin' in auth && 'user' in auth) {
+          saveAuthSnap(auth);
+          return auth;
+        }
+      }
+    } catch (e) {}
+    const snap = loadAuthSnap();
+    if (snap && 'admin' in snap) return snap;
+  }
+  return fetchJson('access.json?_=' + Date.now());
 }
-function applyAccessOverrides() {
-  S.authBase = S.authBase || S.auth;
-  S.auth = mergeAuth(S.authBase);
+
+// بيحفظ الـ config الجديد: snapshot محلي دايم، ويـ POST للـ web app لو متظبط
+async function persistAuth(auth) {
+  saveAuthSnap(auth);
+  S.authBase = auth;
+  if (ACCESS_API_URL) {
+    try {
+      const res = await fetch(ACCESS_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(auth),
+        cache: 'no-store',
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const txt = await res.text();
+      if (!/^OK\b/i.test(txt)) throw new Error(String(txt).slice(0, 120));
+    } catch (e) {
+      alert('⚠️ فشل حفظ الـ access: ' + e.message + '\nتأكد إن web app متعمل لها Deploy بـ "Execute as me" و "Anyone".');
+      return false;
+    }
+  }
+  S.auth = cloneAuth(auth);
+  return true;
 }
 
 function renderAccessMgmt() {
@@ -2640,9 +2678,9 @@ function renderAccessMgmt() {
   const rows = clients.map(([pwd, c]) => [pwd, (c.projects || []).join(', '), c.is_vodafone ? '✅' : '—',
     c.logo ? (/^(data:|https?:|blob:)/.test(String(c.logo)) ? `<img class="am-logo-cell" src="${esc(c.logo)}" alt="logo">` : c.logo) : '—']);
   content.innerHTML = `<div class="page-title">🔐 Access Management</div>
-    <div class="am-note">Changes apply instantly in this browser. To make them permanent for everyone, click
-      <b>⬇️ Download access.json</b> and replace <code>web/access.json</code> with the saved file.
-      Uploaded logos are embedded inside <code>access.json</code> automatically.</div>
+    <div class="am-note">${ACCESS_API_URL
+      ? '✅ أي Add / Save / Delete بيتحفظ فوراً في المخزن المركزي (تبويب AccessConfig في الشيت) — بيتثبت لكل الناس من غير ما تعدّل access.json.'
+      : '⚠️ الوضع الحالي: التعديلات مؤقتة في المتصفح ده بس. عشان تتثبت للكل، دوّن رابط Web App في الثابت ACCESS_API_URL (أعلى app.js) — أو نزّل access.json واحفظه مكان الملف.'}</div>
 
     <div class="st-section-title">➕ Add New Access</div>
     <div class="am-form">
@@ -2708,47 +2746,35 @@ function renderAccessMgmt() {
     preview.removeAttribute('src');
   });
 
-  $('#am-add').addEventListener('click', () => {
+  $('#am-add').addEventListener('click', async () => {
     const key = cleanVal($('#am-key').value);
     if (!key) return;
-    const o = loadOverrides();
-    o.removed = (o.removed || []).filter((k) => k !== key);
-    if (roleSel.value === 'admin') o.admin = key;
-    else if (roleSel.value === 'user') o.user = key;
+    const next = cloneAuth(S.authBase || S.auth);
+    if (roleSel.value === 'admin') next.admin = key;
+    else if (roleSel.value === 'user') next.user = key;
     else {
-      o.added = o.added || {};
-      o.added[key] = {
+      next.clients[key] = {
         projects: cleanVal($('#am-projects').value).split(',').map((s) => s.trim()).filter(Boolean),
         is_vodafone: $('#am-vf').checked,
         logo: pendingLogo || cleanVal(logoInput.value).replace(/^assets\//, '') || null,
       };
     }
-    saveOverrides(o);
-    applyAccessOverrides();
-    renderAccessMgmt();
+    if (await persistAuth(next)) renderAccessMgmt();
   });
 
-  $('#am-save-keys').addEventListener('click', () => {
-    const o = loadOverrides();
-    o.admin = cleanVal($('#am-admin').value);
-    o.user = cleanVal($('#am-user').value);
-    saveOverrides(o);
-    applyAccessOverrides();
-    renderAccessMgmt();
+  $('#am-save-keys').addEventListener('click', async () => {
+    const next = cloneAuth(S.authBase || S.auth);
+    next.admin = cleanVal($('#am-admin').value);
+    next.user = cleanVal($('#am-user').value);
+    if (await persistAuth(next)) renderAccessMgmt();
   });
 
   $$('.am-del').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const key = btn.dataset.del;
-      const o = loadOverrides();
-      if (o.added && o.added[key]) delete o.added[key];
-      if (S.authBase.clients && key in S.authBase.clients) {
-        o.removed = o.removed || [];
-        if (!o.removed.includes(key)) o.removed.push(key);
-      }
-      saveOverrides(o);
-      applyAccessOverrides();
-      renderAccessMgmt();
+      const next = cloneAuth(S.authBase || S.auth);
+      delete next.clients[key];
+      if (await persistAuth(next)) renderAccessMgmt();
     });
   });
 
@@ -2983,8 +3009,8 @@ async function init() {
   $('#login-btn').addEventListener('click', submitLogin);
   $('#login-key').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitLogin(); });
 
-  S.authBase = await fetchJson('access.json?_=' + Date.now());
-  S.auth = mergeAuth(S.authBase);
+  S.authBase = await loadAuthBase();
+  S.auth = cloneAuth(S.authBase);
 
   if (saved) {
     try {
