@@ -426,7 +426,7 @@ const LIVE_SLA_GID = 1713632809;
 // 🔐 رابط Apps Script Web App (pipeline/access_api.gs) — اللي بيتحفظ منه تعديلات
 // 🔐 Access Management فوراً بشكل دائم لكل المتصفحات. لو سايبه فاضية ('') بيشتغل
 // على access.json الملف (بدون حفظ دائم) — لحد ما نربط الرابط.
-const ACCESS_API_URL = '';
+const ACCESS_API_URL = 'https://script.google.com/macros/s/AKfycbxeIL1g0xFEfxafto9o7OhR1gDam-lEY00QR8G4TctdWxgLULy7gsO6RaF8zMc9hhswCg/exec';
 const AUTH_SNAP_KEY = 'ds_auth_snap';
 
 function fetchSheetCsv(gid) {
