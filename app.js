@@ -1095,6 +1095,7 @@ function submitLogin() {
   if (!key) return;
   if (key === S.auth.admin) { S.session = { role: 'admin', key }; }
   else if (key === S.auth.user) { S.session = { role: 'user', key }; }
+  else if (S.auth.members[key]) { S.session = { role: S.auth.members[key].role === 'admin' ? 'admin' : 'user', key }; }
   else if (S.auth.clients[key]) {
     const c = S.auth.clients[key];
     S.session = { role: 'client', key, projects: c.projects, is_vodafone: !!c.is_vodafone, logo: c.logo || null };
@@ -1311,8 +1312,15 @@ const ALL_TABS = ['Overview','WhatsApp MOM','Inbound SLA','Quality Board','Asana
 const DEFAULT_USER_TABS = ['Overview','Ticket Explorer'];
 
 function tabsForRole() {
-  if (S.session.role === 'admin') return (S.auth.tabs && S.auth.tabs.admin && S.auth.tabs.admin.length) ? S.auth.tabs.admin : ALL_TABS;
-  if (S.session.role === 'user') return (S.auth.tabs && S.auth.tabs.user && S.auth.tabs.user.length) ? S.auth.tabs.user : DEFAULT_USER_TABS;
+  const member = S.auth.members && S.auth.members[S.session.key];
+  if (S.session.role === 'admin') {
+    if (member && Array.isArray(member.tabs) && member.tabs.length) return member.tabs;
+    return (S.auth.tabs && S.auth.tabs.admin && S.auth.tabs.admin.length) ? S.auth.tabs.admin : ALL_TABS;
+  }
+  if (S.session.role === 'user') {
+    if (member && Array.isArray(member.tabs) && member.tabs.length) return member.tabs;
+    return (S.auth.tabs && S.auth.tabs.user && S.auth.tabs.user.length) ? S.auth.tabs.user : DEFAULT_USER_TABS;
+  }
   if (S.session.role === 'client') {
     const c = S.auth.clients[S.session.key];
     if (c && Array.isArray(c.tabs) && c.tabs.length) return c.tabs;
@@ -2646,7 +2654,7 @@ function readAmTabs(root) {
 // ACCESS_API_URL متظبط — ولو غُلب (offline/خطأ) يرجع لآخر نسخة محفوظة في
 // الـ localStorage، ولو مفيش يرجع لملف access.json العادي.
 function cloneAuth(base) {
-  return { admin: base.admin, user: base.user, clients: Object.assign({}, (base && base.clients) || {}), tabs: Object.assign({}, (base && base.tabs) || {}) };
+  return { admin: base.admin, user: base.user, clients: Object.assign({}, (base && base.clients) || {}), members: Object.assign({}, (base && base.members) || {}), tabs: Object.assign({}, (base && base.tabs) || {}) };
 }
 function saveAuthSnap(auth) { try { localStorage.setItem(AUTH_SNAP_KEY, JSON.stringify(auth)); } catch (e) {} }
 function loadAuthSnap() { try { return JSON.parse(localStorage.getItem(AUTH_SNAP_KEY)) || null; } catch (e) { return null; } }
@@ -2693,6 +2701,9 @@ function renderAccessMgmt() {
   const clients = Object.entries(S.auth.clients || {});
   const rows = clients.map(([pwd, c]) => [pwd, (c.projects || []).join(', '), c.is_vodafone ? '✅' : '—',
     c.logo ? (/^(data:|https?:|blob:)/.test(String(c.logo)) ? `<img class="am-logo-cell" src="${esc(c.logo)}" alt="logo">` : c.logo) : '—']);
+  const members = Object.entries(S.auth.members || {});
+  const mrows = members.map(([k, m]) => [k, m.role === 'admin' ? '👑 Admin' : '👤 User',
+    (Array.isArray(m.tabs) && m.tabs.length) ? m.tabs.join(', ') : '<span style="opacity:.55">default</span>']);
   content.innerHTML = `<div class="page-title">🔐 Access Management</div>
     <div class="am-note">${ACCESS_API_URL
       ? '✅ أي Add / Save / Delete بيتحفظ فوراً في المخزن المركزي (تبويب AccessConfig في الشيت) — بيتثبت لكل الناس من غير ما تعدّل access.json.'
@@ -2724,14 +2735,18 @@ function renderAccessMgmt() {
       <div class="am-actions"><button class="dl-btn" id="am-save-keys">💾 Save Keys</button></div>
     </div>
 
+    <div class="st-section-title">👑 Additional Admin/User Members (${mrows.length})</div>
+    ${mrows.length ? `<div class="table-wrap thin">${renderTable(['Key', 'Role', 'Tabs', ''], mrows.map((r, i) => [...r, `<button class="am-del" data-kind="member" data-del="${esc(members[i][0])}" title="Edit tabs">✏️</button> <button class="am-del" data-kind="member" data-rm="1" data-del="${esc(members[i][0])}" title="Delete">🗑️</button>`]), [2])}</div>` : '<div class="empty-msg">No additional members — اضف admin/user access وسيظهر هنا مستقلاً (dsq123/admin123 يثبّتون كما هم)</div>'}
+
     <div class="st-section-title">👥 Client Accesses (${rows.length})</div>
     <div class="am-edit-panel" id="am-edit-panel" hidden>
       <div class="st-section-title" style="margin-top:0;">✏️ Edit Tabs — <span id="am-edit-key"></span></div>
-      <label class="am-f">🗂️ Tab permissions <span style="opacity:.75;font-weight:400;">(فاضية = شاشة العميل الافتراضية)</span></label>
+      <input type="hidden" id="am-edit-kind" value="client">
+      <label class="am-f">🗂️ Tab permissions <span style="opacity:.75;font-weight:400;">(فاضية = الشاشة الافتراضية)</span></label>
       <div id="am-edit-tabs"></div>
       <div class="am-actions"><button class="dl-btn" id="am-edit-save">💾 Save</button> <button class="dl-btn" id="am-edit-cancel">✖️ Cancel</button></div>
     </div>
-    ${rows.length ? `<div class="table-wrap thin">${renderTable(['Key', 'Projects', 'Vodafone', 'Logo', ''], rows.map((r, i) => [...r, `<button class="am-del" data-del="${esc(clients[i][0])}" title="Edit tabs">✏️</button> <button class="am-del" data-del="${esc(clients[i][0])}" data-rm="1" title="Delete">🗑️</button>`]), [3, 4])}</div>` : '<div class="empty-msg">No client accesses</div>'}
+    ${rows.length ? `<div class="table-wrap thin">${renderTable(['Key', 'Projects', 'Vodafone', 'Logo', ''], rows.map((r, i) => [...r, `<button class="am-del" data-kind="client" data-del="${esc(clients[i][0])}" title="Edit tabs">✏️</button> <button class="am-del" data-kind="client" data-rm="1" data-del="${esc(clients[i][0])}" title="Delete">🗑️</button>`]), [3, 4])}</div>` : '<div class="empty-msg">No client accesses</div>'}
 
     <div class="am-actions" style="margin-top:16px;"><button class="dl-btn" id="am-download">⬇️ Download access.json</button></div>`;
 
@@ -2779,11 +2794,11 @@ function renderAccessMgmt() {
     const sel = readAmTabs($('#am-tabs-grid'));
     const next = cloneAuth(S.authBase || S.auth);
     if (roleSel.value === 'admin') {
-      next.admin = key;
-      if (sel.length) next.tabs.admin = sel; else if (next.tabs) delete next.tabs.admin;
+      next.members[key] = { role: 'admin' };
+      if (sel.length) next.members[key].tabs = sel;
     } else if (roleSel.value === 'user') {
-      next.user = key;
-      if (sel.length) next.tabs.user = sel; else if (next.tabs) delete next.tabs.user;
+      next.members[key] = { role: 'user' };
+      if (sel.length) next.members[key].tabs = sel;
     } else {
       next.clients[key] = {
         projects: cleanVal($('#am-projects').value).split(',').map((s) => s.trim()).filter(Boolean),
@@ -2805,17 +2820,19 @@ function renderAccessMgmt() {
   $$('.am-del').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const key = btn.dataset.del;
+      const kind = btn.dataset.kind || 'client';
       if (btn.dataset.rm !== '1') {
-        const c = S.auth.clients[key];
+        const src = kind === 'member' ? (S.auth.members && S.auth.members[key]) : (S.auth.clients && S.auth.clients[key]);
         $('#am-edit-key').textContent = key;
-        $('#am-edit-tabs').innerHTML = amTabsGridHtml(c && c.tabs);
+        $('#am-edit-kind').value = kind;
+        $('#am-edit-tabs').innerHTML = amTabsGridHtml(src && src.tabs);
         amTabAll($('#am-edit-tabs'));
         $('#am-edit-panel').hidden = false;
         $('#am-edit-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         return;
       }
       const next = cloneAuth(S.authBase || S.auth);
-      delete next.clients[key];
+      if (kind === 'member') delete next.members[key]; else delete next.clients[key];
       if (await persistAuth(next)) renderAccessMgmt();
     });
   });
@@ -2823,10 +2840,12 @@ function renderAccessMgmt() {
   $('#am-edit-save').addEventListener('click', async () => {
     const key = cleanVal($('#am-edit-key').textContent);
     if (!key) return;
+    const kind = $('#am-edit-kind').value;
     const sel = readAmTabs($('#am-edit-tabs'));
     const next = cloneAuth(S.authBase || S.auth);
-    if (next.clients[key]) {
-      if (sel.length) next.clients[key].tabs = sel; else delete next.clients[key].tabs;
+    const rec = kind === 'member' ? next.members[key] : next.clients[key];
+    if (rec) {
+      if (sel.length) rec.tabs = sel; else delete rec.tabs;
     }
     if (await persistAuth(next)) renderAccessMgmt();
   });
@@ -2834,7 +2853,7 @@ function renderAccessMgmt() {
   $('#am-edit-cancel').addEventListener('click', () => { $('#am-edit-panel').hidden = true; });
 
   $('#am-download').addEventListener('click', () => {
-    const data = JSON.stringify({ admin: S.auth.admin, user: S.auth.user, clients: S.auth.clients }, null, 2);
+    const data = JSON.stringify({ admin: S.auth.admin, user: S.auth.user, clients: S.auth.clients, members: S.auth.members || {}, tabs: S.auth.tabs || {} }, null, 2);
     const blob = new Blob([data], { type: 'application/json;charset=utf-8;' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -3071,8 +3090,8 @@ async function init() {
     try {
       const sess = JSON.parse(saved);
       const valid =
-        (sess.role === 'admin' && sess.key === S.auth.admin) ||
-        (sess.role === 'user' && sess.key === S.auth.user) ||
+        (sess.role === 'admin' && (sess.key === S.auth.admin || (S.auth.members[sess.key] && S.auth.members[sess.key].role === 'admin'))) ||
+        (sess.role === 'user' && (sess.key === S.auth.user || (S.auth.members[sess.key] && S.auth.members[sess.key].role !== 'admin'))) ||
         (sess.role === 'client' && !!S.auth.clients[sess.key]);
       if (valid) {
         S.session = sess;
