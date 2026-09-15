@@ -1307,9 +1307,16 @@ function renderHeader() {
   </div>`;
 }
 
+const ALL_TABS = ['Overview','WhatsApp MOM','Inbound SLA','Quality Board','Asana Tracker','Ticket Explorer'];
+const DEFAULT_USER_TABS = ['Overview','Ticket Explorer'];
+
 function tabsForRole() {
-  if (S.session.role === 'admin') return ['Overview','WhatsApp MOM','Inbound SLA','Quality Board','Asana Tracker','Ticket Explorer'];
-  if (S.session.role === 'user') return ['Overview','Ticket Explorer'];
+  if (S.session.role === 'admin') return (S.auth.tabs && S.auth.tabs.admin && S.auth.tabs.admin.length) ? S.auth.tabs.admin : ALL_TABS;
+  if (S.session.role === 'user') return (S.auth.tabs && S.auth.tabs.user && S.auth.tabs.user.length) ? S.auth.tabs.user : DEFAULT_USER_TABS;
+  if (S.session.role === 'client') {
+    const c = S.auth.clients[S.session.key];
+    if (c && Array.isArray(c.tabs) && c.tabs.length) return c.tabs;
+  }
   return null;
 }
 
@@ -1732,7 +1739,7 @@ function renderOverview() {
   const content = $('#content');
   content.innerHTML = '';
 
-  if (S.session.role === 'client') { renderClientSection(); return; }
+  if (S.session.role === 'client' && !tabsForRole()) { renderClientSection(); return; }
 
   // admin/user: sub-tabs
   const subtabs = document.createElement('div');
@@ -2621,11 +2628,25 @@ function renderExplorer() {
 }
 
 /* ============================== ACCESS MGMT ============================== */
+// شبكة صلاحيات الـ Tabs: كل access ممكن يحدد الـ Tabs الظاهرة له
+function amTabsGridHtml(current) {
+  const sel = Array.isArray(current) ? current : [];
+  return `<div class="am-tabs-grid">${ALL_TABS.map((t) => `<label class="am-tab-cb"><input type="checkbox" data-am-tab="${esc(t)}" ${sel.includes(t) ? 'checked' : ''}><span>${TAB_EMOJI[t] || ''} ${esc(t)}</span></label>`).join('')}<label class="am-tab-cb all"><input type="checkbox" data-am-all><span>☑️ كل الـ Tabs</span></label></div>`;
+}
+function amTabAll(root) {
+  const box = root.querySelector('[data-am-all]');
+  if (!box) return;
+  box.addEventListener('change', () => root.querySelectorAll('[data-am-tab]').forEach((cb) => { cb.checked = box.checked; }));
+}
+function readAmTabs(root) {
+  return Array.prototype.map.call(root.querySelectorAll('[data-am-tab]:checked'), (el) => el.dataset.amTab);
+}
+
 // المنظومة الجديدة: الـ config المصدر الأساسي له من Web App (access_api.gs) لو
 // ACCESS_API_URL متظبط — ولو غُلب (offline/خطأ) يرجع لآخر نسخة محفوظة في
 // الـ localStorage، ولو مفيش يرجع لملف access.json العادي.
 function cloneAuth(base) {
-  return { admin: base.admin, user: base.user, clients: Object.assign({}, (base && base.clients) || {}) };
+  return { admin: base.admin, user: base.user, clients: Object.assign({}, (base && base.clients) || {}), tabs: Object.assign({}, (base && base.tabs) || {}) };
 }
 function saveAuthSnap(auth) { try { localStorage.setItem(AUTH_SNAP_KEY, JSON.stringify(auth)); } catch (e) {} }
 function loadAuthSnap() { try { return JSON.parse(localStorage.getItem(AUTH_SNAP_KEY)) || null; } catch (e) { return null; } }
@@ -2654,15 +2675,10 @@ async function persistAuth(auth) {
   S.authBase = auth;
   if (ACCESS_API_URL) {
     try {
-      const res = await fetch(ACCESS_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(auth),
-        cache: 'no-store',
-      });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const qs = '?payload=' + encodeURIComponent(JSON.stringify(auth));
+      const res = await fetch(ACCESS_API_URL + qs, { cache: 'no-store' });
       const txt = await res.text();
-      if (!/^OK\b/i.test(txt)) throw new Error(String(txt).slice(0, 120));
+      if (!res.ok || !/^OK\b/i.test(txt)) throw new Error(String(txt).slice(0, 120));
     } catch (e) {
       alert('⚠️ فشل حفظ الـ access: ' + e.message + '\nتأكد إن web app متعمل لها Deploy بـ "Execute as me" و "Anyone".');
       return false;
@@ -2686,6 +2702,8 @@ function renderAccessMgmt() {
     <div class="am-form">
       <label class="am-f">Key / Password<input id="am-key" class="search-input" placeholder="e.g. newclient123"></label>
       <label class="am-f">Role<select id="am-role" class="select-sel"><option value="client">Client</option><option value="admin">Admin</option><option value="user">User</option></select></label>
+      <label class="am-f">🗂️ Tab permissions <span style="opacity:.75;font-weight:400;">(فاضية = الافتراضي)</span></label>
+      <div id="am-tabs-grid">${amTabsGridHtml([])}</div>
       <label class="am-f" id="am-f-projects">Projects (comma separated)<input id="am-projects" class="search-input" placeholder="e.g. Project A, Project B"></label>
       <label class="am-f" id="am-f-vf"><span>Vodafone</span><input id="am-vf" type="checkbox" style="width:auto;transform:scale(1.4);margin-top:8px;"></label>
       <label class="am-f" id="am-f-logo"><span>Logo</span>
@@ -2707,7 +2725,13 @@ function renderAccessMgmt() {
     </div>
 
     <div class="st-section-title">👥 Client Accesses (${rows.length})</div>
-    ${rows.length ? `<div class="table-wrap thin">${renderTable(['Key', 'Projects', 'Vodafone', 'Logo', ''], rows.map((r, i) => [...r, `<button class="am-del" data-del="${esc(clients[i][0])}">🗑️</button>`]), [3, 4])}</div>` : '<div class="empty-msg">No client accesses</div>'}
+    <div class="am-edit-panel" id="am-edit-panel" hidden>
+      <div class="st-section-title" style="margin-top:0;">✏️ Edit Tabs — <span id="am-edit-key"></span></div>
+      <label class="am-f">🗂️ Tab permissions <span style="opacity:.75;font-weight:400;">(فاضية = شاشة العميل الافتراضية)</span></label>
+      <div id="am-edit-tabs"></div>
+      <div class="am-actions"><button class="dl-btn" id="am-edit-save">💾 Save</button> <button class="dl-btn" id="am-edit-cancel">✖️ Cancel</button></div>
+    </div>
+    ${rows.length ? `<div class="table-wrap thin">${renderTable(['Key', 'Projects', 'Vodafone', 'Logo', ''], rows.map((r, i) => [...r, `<button class="am-del" data-del="${esc(clients[i][0])}" title="Edit tabs">✏️</button> <button class="am-del" data-del="${esc(clients[i][0])}" data-rm="1" title="Delete">🗑️</button>`]), [3, 4])}</div>` : '<div class="empty-msg">No client accesses</div>'}
 
     <div class="am-actions" style="margin-top:16px;"><button class="dl-btn" id="am-download">⬇️ Download access.json</button></div>`;
 
@@ -2721,6 +2745,9 @@ function renderAccessMgmt() {
   };
   roleSel.addEventListener('change', upd);
   upd();
+
+  // select-all للشبكة بتاعة الـ add
+  amTabAll($('#am-tabs-grid'));
 
   // logo upload -> data URL preview
   let pendingLogo = null;
@@ -2749,15 +2776,21 @@ function renderAccessMgmt() {
   $('#am-add').addEventListener('click', async () => {
     const key = cleanVal($('#am-key').value);
     if (!key) return;
+    const sel = readAmTabs($('#am-tabs-grid'));
     const next = cloneAuth(S.authBase || S.auth);
-    if (roleSel.value === 'admin') next.admin = key;
-    else if (roleSel.value === 'user') next.user = key;
-    else {
+    if (roleSel.value === 'admin') {
+      next.admin = key;
+      if (sel.length) next.tabs.admin = sel; else if (next.tabs) delete next.tabs.admin;
+    } else if (roleSel.value === 'user') {
+      next.user = key;
+      if (sel.length) next.tabs.user = sel; else if (next.tabs) delete next.tabs.user;
+    } else {
       next.clients[key] = {
         projects: cleanVal($('#am-projects').value).split(',').map((s) => s.trim()).filter(Boolean),
         is_vodafone: $('#am-vf').checked,
         logo: pendingLogo || cleanVal(logoInput.value).replace(/^assets\//, '') || null,
       };
+      if (sel.length) next.clients[key].tabs = sel;
     }
     if (await persistAuth(next)) renderAccessMgmt();
   });
@@ -2772,11 +2805,33 @@ function renderAccessMgmt() {
   $$('.am-del').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const key = btn.dataset.del;
+      if (btn.dataset.rm !== '1') {
+        const c = S.auth.clients[key];
+        $('#am-edit-key').textContent = key;
+        $('#am-edit-tabs').innerHTML = amTabsGridHtml(c && c.tabs);
+        amTabAll($('#am-edit-tabs'));
+        $('#am-edit-panel').hidden = false;
+        $('#am-edit-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return;
+      }
       const next = cloneAuth(S.authBase || S.auth);
       delete next.clients[key];
       if (await persistAuth(next)) renderAccessMgmt();
     });
   });
+
+  $('#am-edit-save').addEventListener('click', async () => {
+    const key = cleanVal($('#am-edit-key').textContent);
+    if (!key) return;
+    const sel = readAmTabs($('#am-edit-tabs'));
+    const next = cloneAuth(S.authBase || S.auth);
+    if (next.clients[key]) {
+      if (sel.length) next.clients[key].tabs = sel; else delete next.clients[key].tabs;
+    }
+    if (await persistAuth(next)) renderAccessMgmt();
+  });
+
+  $('#am-edit-cancel').addEventListener('click', () => { $('#am-edit-panel').hidden = true; });
 
   $('#am-download').addEventListener('click', () => {
     const data = JSON.stringify({ admin: S.auth.admin, user: S.auth.user, clients: S.auth.clients }, null, 2);
@@ -2803,7 +2858,7 @@ function renderAll() {
   const content = $('#content');
   content.innerHTML = '';
 
-  if (S.session.role === 'client') {
+  if (S.session.role === 'client' && !tabsForRole()) {
     $('#tabbar').innerHTML = '';
     renderClientSection();
   } else if (S.activeTab === 99) {
