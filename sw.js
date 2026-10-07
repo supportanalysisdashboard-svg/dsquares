@@ -1,4 +1,4 @@
-const CACHE = 'dash-v2';
+const CACHE = 'dash-v3';
 
 self.addEventListener('install', (e) => {
   e.waitUntil(

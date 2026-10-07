@@ -39,7 +39,7 @@ SHEET_GIDS = {
     "inbound_sla": 1713632809,
     "redemption": 17439532,
     "financial_actions": 1458710714,
-    "asana_tracker": 1460146783,
+    "asana_tracker": 226182946,
 }
 
 BLACK_LIST = ['', 'n/a', 'n.a', 'n', 'dropped call', 'call dropped', 'out of our scope', 'other', '0', 'na', ' ', 'N', 'none', 'nan', 'N/A', '0.0', 'NaN', 'None', 'n/m', 'N/M', "what's app"]
@@ -330,7 +330,11 @@ def main():
     df_merchant = process_ticket_df(raw["merchant_support"])
     df_client = process_ticket_df(raw["client_support"])
     for d in (df_merchant, df_client):
-        if not d.empty and "Closed time" in d.columns:
+        if not d.empty and "Status" in d.columns:
+            # Column B of the ticket tabs is the Freshdesk status — that is the
+            # source of truth (not Closed time, which can be missing/N-A).
+            d["Ticket_Status"] = d["Status"].astype(str).str.strip().str.lower().eq("closed").map({True: "Closed", False: "Open"})
+        elif not d.empty and "Closed time" in d.columns:
             d["Ticket_Status"] = pd.to_datetime(d["Closed time"], errors="coerce").notna().map({True: "Closed", False: "Open"})
         if not d.empty and "Project" in d.columns:
             d["Project"] = d["Project"].replace(PROJECT_RENAME)

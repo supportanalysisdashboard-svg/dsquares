@@ -222,6 +222,15 @@ function isDate(v) {
 }
 
 function applyLiveStatus(cols, rows) {
+  // Column B of the ticket tabs holds the Freshdesk status — that is the source
+  // of truth for the Open/Closed split (Closed time can be missing or "N/A").
+  const si = cols.indexOf('Status');
+  if (si >= 0) {
+    return {
+      cols: cols.concat(['Ticket_Status']),
+      rows: rows.map((r) => r.concat([String(r[si] == null ? '' : r[si]).trim().toLowerCase() === 'closed' ? 'Closed' : 'Open']))
+    };
+  }
   const ci = cols.indexOf('Closed time');
   if (ci < 0) return { cols: cols.concat(['Ticket_Status']), rows: rows.map((r) => r.concat(['Open'])) };
   return { cols: cols.concat(['Ticket_Status']), rows: rows.map((r) => r.concat([isDate(r[ci]) ? 'Closed' : 'Open'])) };
