@@ -37,7 +37,7 @@ const S = {
   tickets: null,               // {cols, rows}
   colIdx: {},
   agent: null, sla: null, redemption: null, financial: null, asana: null, asanaStatuses: null, asanaNewlyCompleted: null,
-  filters: { dateMode:null, customStart:null, customEnd:null,
+  filters: { dateMode:null, customStart:null, customEnd:null, ticketId:'',
              merchant:[], project:[], branch:[], district:[], type:[], subtype:[], microtype:[], action:[], status:[] },
    fSearch: {},
    clickFilter: { col:null, val:null },
@@ -735,8 +735,13 @@ function baseFilter(row) {
   return true;
 }
 
+function ticketIdTokens() {
+  return String(S.filters.ticketId || '').split(/[\s,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
 function applyFilters(rows) {
   const f = S.filters;
+  const tids = ticketIdTokens();
   return rows.filter((r) => {
     if (f.merchant.length && !f.merchant.includes(get(r, 'Merchant'))) return false;
     if (f.project.length && !f.project.includes(get(r, 'Project'))) return false;
@@ -747,6 +752,10 @@ function applyFilters(rows) {
     if (f.microtype.length && !f.microtype.includes(get(r, 'Call Microtype'))) return false;
     if (f.action.length && !f.action.includes(get(r, 'Action taken'))) return false;
     if (f.status.length && !f.status.includes(get(r, 'Ticket_Status'))) return false;
+    if (tids.length) {
+      const tidVal = cleanVal(get(r, 'Ticket ID')).toLowerCase();
+      if (!tids.some((t) => tidVal.includes(t))) return false;
+    }
     if (S.clickFilter.col) {
       const cfIdx = col(S.clickFilter.col);
       if (cfIdx != null && cleanVal(get(r, S.clickFilter.col)) !== S.clickFilter.val) return false;
@@ -766,6 +775,7 @@ function computeActiveFilters() {
   if (f.microtype.length) active['Ticket microtype'] = f.microtype.join(', ');
   if (f.action.length) active.Action = f.action.join(', ');
   if (f.status.length) active.Status = f.status.join(', ');
+  if (f.ticketId) active['Ticket ID'] = f.ticketId;
   if (f.dateMode && f.dateMode !== 'All time') {
     if (f.dateMode === 'Custom range') active.Date = `${f.customStart} → ${f.customEnd}`;
     else active.Date = f.dateMode;
@@ -1115,6 +1125,7 @@ function submitLogin() {
 }
 
 /* ============================== RENDER: SIDEBAR ============================== */
+let tidTimer = null;
 const MSEL_LABEL = { merchant:'🏪 Merchant', project:'🏢 Project', branch:'📍 Branch', district:'🗺️ District', type:'🎫 Ticket type', subtype:'🏷️ Ticket subtype', microtype:'🔬 Ticket microtype', action:'🎬 Action taken', status:'🎫 Ticket Status' };
 const MSEL_COL = { merchant:'Merchant', project:'Project', branch:'Branch User Name', district:'District', type:'Ticket type', subtype:'Ticket subtype', microtype:'Call Microtype', action:'Action taken', status:'Ticket_Status' };
 
@@ -1159,6 +1170,8 @@ function bindMselBehaviors(sb) {
       if (name === 'date') {
         S.filters.dateMode = defaultDateMode();
         S.filters.customStart = S.filters.customEnd = null;
+      } else if (name === 'ticketId') {
+        S.filters.ticketId = '';
       } else {
         S.filters[name] = [];
       }
@@ -1216,6 +1229,13 @@ function renderSidebar() {
         <input type="date" class="select-sel date-sel" id="cust-start" value="${esc(S.filters.customStart || '')}" style="color:#fff;background:${NAVY};">
         <input type="date" class="select-sel date-sel" id="cust-end" value="${esc(S.filters.customEnd || '')}" style="color:#fff;background:${NAVY};">
       </div>` : ''}
+    <div class="sb-filter-hd">
+      <label class="f-label">🎫 Ticket ID</label>
+      ${S.filters.ticketId ? `<button class="msel-clear" data-clear="ticketId" title="Clear Ticket ID filter">✕</button>` : ''}
+    </div>
+    <div class="ticketid-wrap">
+      <input class="ticketid-input" id="ticket-id-input" type="text" placeholder="Enter Ticket ID…" value="${esc(S.filters.ticketId || '')}" autocomplete="off">
+    </div>
     ${mselHtml('merchant', 'Merchant', '🏪 Merchant')}
     ${fProjectHtml}
     ${isClient ? '' : mselHtml('branch', 'Branch User Name', '📍 Branch')}
@@ -1243,6 +1263,23 @@ function renderSidebar() {
   const cs = $('#cust-start'), ce = $('#cust-end');
   if (cs) cs.addEventListener('change', (e) => { S.filters.customStart = e.target.value; renderAll(); });
   if (ce) ce.addEventListener('change', (e) => { S.filters.customEnd = e.target.value; renderAll(); });
+
+  // ticket id lookup
+  const tidInput = $('#ticket-id-input');
+  if (tidInput) {
+    const applyTid = () => {
+      if (tidTimer) { clearTimeout(tidTimer); tidTimer = null; }
+      renderAll();
+      const n = $('#ticket-id-input');
+      if (n) { n.focus(); const L = n.value.length; try { n.setSelectionRange(L, L); } catch (er) {} }
+    };
+    tidInput.addEventListener('input', (e) => {
+      S.filters.ticketId = e.target.value;
+      if (tidTimer) clearTimeout(tidTimer);
+      tidTimer = setTimeout(applyTid, 250);
+    });
+    tidInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyTid(); } });
+  }
 
   // multiselects
   bindMselBehaviors(sb);
@@ -3045,7 +3082,7 @@ function hideLoading() {
 async function boot() {
   // reset UI state tied to the session
   S.filters = { dateMode: defaultDateMode(),
-    customStart: null, customEnd: null, merchant: [], project: [], branch: [], district: [], type: [], subtype: [], microtype: [], action: [], status: [] };
+    customStart: null, customEnd: null, ticketId: '', merchant: [], project: [], branch: [], district: [], type: [], subtype: [], microtype: [], action: [], status: [] };
   S.fSearch = {};
   S.clickFilter = { col: null, val: null };
   S.activeTab = 0;
